@@ -2,21 +2,21 @@
 main.py
 
 WHAT : This is the main program. It builds the deep agent (the manager) and
-       its sub-agents, then runs one churn analysis. The manager now starts
-       from an ML-ranked shortlist instead of a raw "who is inactive" query.
+       its sub-agents, then runs one churn analysis and reports the run cost.
 WHY  : The ML model scores all customers cheaply and ranks them by priority
        (churn risk x value). The agent then investigates only the top ones.
        This is the full hybrid: ML predicts, the agent investigates, and
-       both feed the final decision.
+       both feed the final decision. We also track token cost per run.
 FLOW : build model -> define the sub-agents (risk-ranker, ticket, review) ->
-       build the deep agent with the supervisor prompt -> send it a task ->
-       print and save the structured report.
+       build the deep agent -> run the task -> print report -> save
+       predictions -> print the token cost of the run.
 LOGIC: a sub-agent's "description" tells the MANAGER when to call it. A
        sub-agent's "system_prompt" tells the SUB-AGENT how to do its job.
 """
 import json
 
 from deepagents import create_deep_agent
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from utils import get_model
 from scoring import get_churn_candidates
@@ -101,8 +101,11 @@ if __name__ == "__main__":
         "ML probability and the evidence, and give one assessment per customer."
     )
 
+    # a callback that records how many tokens every model call used
+    usage_cb = UsageMetadataCallbackHandler()
     result = agent.invoke(
-        {"messages": [{"role": "user", "content": task}]}
+        {"messages": [{"role": "user", "content": task}]},
+        config={"callbacks": [usage_cb]},
     )
 
     # The structured output lives in result["structured_response"].
@@ -122,3 +125,21 @@ if __name__ == "__main__":
     with open("churn_predictions.json", "w") as f:
         json.dump(predictions, f, indent=2)
     print(f"\nSaved {len(predictions)} predictions to churn_predictions.json")
+
+    # --- cost of this run (token usage x approximate Gemini Flash pricing) ---
+    # NOTE: rates are approximate - adjust to your provider's current pricing.
+    PRICE_IN_PER_M = 0.15    # USD per 1M input tokens
+    PRICE_OUT_PER_M = 0.60   # USD per 1M output tokens
+    USD_TO_INR = 83
+
+    in_tok = sum(u.get("input_tokens", 0) for u in usage_cb.usage_metadata.values())
+    out_tok = sum(u.get("output_tokens", 0) for u in usage_cb.usage_metadata.values())
+    cost_usd = (in_tok / 1_000_000) * PRICE_IN_PER_M + (out_tok / 1_000_000) * PRICE_OUT_PER_M
+
+    print("\n" + "=" * 70)
+    print("RUN COST")
+    print("=" * 70)
+    print(f"Input tokens:  {in_tok:>8,}")
+    print(f"Output tokens: {out_tok:>8,}")
+    print(f"Total tokens:  {in_tok + out_tok:>8,}")
+    print(f"Estimated cost: ${cost_usd:.4f}  (~Rs {cost_usd * USD_TO_INR:.2f}) per scan")
