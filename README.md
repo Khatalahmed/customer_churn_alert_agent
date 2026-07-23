@@ -1,4 +1,6 @@
-# Customer Churn Early-Warning Agent
+﻿# Customer Churn Early-Warning Agent
+
+![CI](https://github.com/Khatalahmed/customer_churn_alert_agent/actions/workflows/ci.yml/badge.svg)
 
 A hybrid **ML + multi-agent** system for a quick-commerce platform (Blinkit / Zepto style)
 that predicts which customers are about to quietly leave, investigates *why* using
