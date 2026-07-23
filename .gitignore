@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets - NEVER commit (API keys, GCP project ID)
+.env
+
+# Local database - generated data, not source code
+*.db
+
+# Editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+
+# Generated artifacts (reproducible by running the pipeline)
+*.pkl
+churn_truth.json
+churn_predictions.json
+churn_predictions_reviewed.json
+contacted.json
+retention_report.md
