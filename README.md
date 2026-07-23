@@ -156,7 +156,7 @@ not the right fit for *this* problem:
 
 ## Tech stack
 
-- **Python 3.12** + [`uv`](https://github.com/astral-sh/uv) (project/package manager)
+- **Python 3.14** + [`uv`](https://github.com/astral-sh/uv) (project/package manager)
 - **Agent harness:** `deepagents` (LangChain / LangGraph) — planning, sub-agents, structured output
 - **LLM:** Gemini via Vertex AI (swappable to Groq / Gemini API via one env var)
 - **ML:** XGBoost, scikit-learn, SHAP, pandas
@@ -166,22 +166,34 @@ not the right fit for *this* problem:
 
 ## Project structure
 
-| File | Role |
-|---|---|
-| `quick_commerce_sim.py` | Synthetic data simulator (causal churn) + ground-truth answer key |
-| `features.py` | Builds the leakage-safe feature table from the DB |
-| `train_model.py` | Trains + evaluates the XGBoost model, saves `churn_model.pkl` |
-| `explain.py` | SHAP explainability (global importance + per-customer top factor) |
-| `scoring.py` | `get_churn_candidates` tool — value-weighted priority ranking |
-| `tools.py` | Deterministic read-only SQL tools (tickets, reviews, inactivity) |
-| `prompts.py` / `schemas.py` | Sub-agent + supervisor prompts; Pydantic output schema |
-| `main.py` | The deep agent: risk-ranker + ticket + review sub-agents |
-| `eval.py` | Precision / recall vs planted ground truth |
-| `verifier.py` | Fact-checks the agent's evidence against the DB |
-| `critic.py` | Skeptical reviewer (multi-agent debate), measures its own impact |
-| `report.py` | Business-ready retention report (markdown) |
-| `memory.py` / `mark_contacted.py` | Contact log — no re-nagging across runs |
-| `utils.py` | `get_model()` — provider-swappable LLM factory |
+```
+customer_churn_alert_agent/
+├── churn/                     # the source package
+│   ├── utils.py               # get_model() - provider-swappable LLM factory
+│   ├── quick_commerce_sim.py  # synthetic data simulator (causal churn) + answer key
+│   ├── features.py            # leakage-safe feature table from the DB
+│   ├── train_model.py         # trains + evaluates XGBoost, saves churn_model.pkl
+│   ├── explain.py             # SHAP explainability (global + per-customer top factor)
+│   ├── scoring.py             # get_churn_candidates tool - value-weighted priority
+│   ├── tools.py               # deterministic read-only SQL tools
+│   ├── prompts.py, schemas.py # sub-agent/supervisor prompts; Pydantic output schema
+│   ├── main.py                # the deep agent: risk-ranker + ticket + review sub-agents
+│   ├── eval.py                # precision / recall vs planted ground truth
+│   ├── verifier.py            # fact-checks the agent's evidence against the DB
+│   ├── critic.py              # skeptical reviewer (multi-agent debate), self-measured
+│   ├── drift.py               # PSI data-drift detection
+│   ├── uplift.py              # retention uplift measurement (hold-out A/B)
+│   ├── report.py              # business-ready retention report (markdown)
+│   └── memory.py, mark_contacted.py  # contact log - no re-nagging across runs
+├── tests/test_churn.py        # pytest suite (deterministic, no LLM)
+├── scripts/                   # standalone exploration (explore_db, check_causality)
+├── docs/                      # PROJECT_GUIDE + sample report
+├── Dockerfile, .github/       # container + CI
+└── pyproject.toml, uv.lock    # dependencies
+```
+
+Generated artifacts (`qcommerce.db`, `churn_model.pkl`, the JSON outputs) are written to
+the repo root at runtime and are git-ignored.
 
 ---
 
@@ -195,21 +207,21 @@ uv sync
 #    e.g. MODEL_PROVIDER=groq  MODEL_NAME=llama-3.3-70b-versatile  GROQ_API_KEY=...
 
 # 3. build the synthetic database + answer key
-uv run python quick_commerce_sim.py init
+uv run python -m churn.quick_commerce_sim init
 
 # 4. train the churn model
-uv run python train_model.py
+uv run python -m churn.train_model
 
 # 5. run the agent (ML ranks -> agent investigates -> structured verdicts)
-uv run python main.py
+uv run python -m churn.main
 
 # 6. measure it
-uv run python eval.py         # precision / recall vs ground truth
-uv run python verifier.py     # evidence fidelity
+uv run python -m churn.eval         # precision / recall vs ground truth
+uv run python -m churn.verifier     # evidence fidelity
 
 # 7. produce the business artifacts
-uv run python report.py       # retention_report.md (with SHAP reasons)
-uv run python explain.py      # SHAP explanations
+uv run python -m churn.report       # retention_report.md (with SHAP reasons)
+uv run python -m churn.explain      # SHAP explanations
 ```
 
 ---

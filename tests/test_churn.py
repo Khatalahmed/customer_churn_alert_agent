@@ -13,9 +13,9 @@ import json
 import numpy as np
 import pandas as pd
 
-from features import build_features, FEATURE_COLS
-from tools import get_inactive_users
-from drift import psi
+from churn.features import build_features, FEATURE_COLS
+from churn.tools import get_inactive_users
+from churn.drift import psi
 
 
 def test_features_shape():
@@ -55,7 +55,7 @@ def test_model_predicts_probabilities():
 
 
 def test_memory_roundtrip(tmp_path, monkeypatch):
-    import memory
+    import churn.memory as memory
     # point the store at a temp file so we don't touch the real contacted.json
     monkeypatch.setattr(memory, "STORE_PATH", str(tmp_path / "contacted.json"))
     assert memory.recently_contacted_ids() == set()

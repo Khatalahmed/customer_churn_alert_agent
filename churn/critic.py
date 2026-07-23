@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from utils import get_model
+from .utils import get_model
 
 
 class CriticVerdict(BaseModel):

@@ -13,7 +13,7 @@ FLOW : load predictions -> get the top SHAP factor per customer -> sort by
 import json
 from datetime import datetime
 
-from explain import top_factor_per_user
+from .explain import top_factor_per_user
 
 with open("churn_predictions.json") as f:
     preds = json.load(f)

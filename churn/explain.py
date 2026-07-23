@@ -18,7 +18,7 @@ import joblib
 import numpy as np
 import shap
 
-from features import build_features
+from .features import build_features
 
 # plain-English name for each feature, for the report
 FRIENDLY = {

@@ -19,8 +19,8 @@ import joblib
 import pandas as pd
 from langchain.tools import tool
 
-from features import build_features
-from memory import recently_contacted_ids
+from .features import build_features
+from .memory import recently_contacted_ids
 
 DB_PATH = "qcommerce.db"
 

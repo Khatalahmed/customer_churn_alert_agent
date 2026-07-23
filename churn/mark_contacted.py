@@ -9,7 +9,7 @@ FLOW : read churn_predictions.json -> mark each user_id as contacted.
 """
 import json
 
-from memory import mark_contacted
+from .memory import mark_contacted
 
 with open("churn_predictions.json") as f:
     preds = json.load(f)

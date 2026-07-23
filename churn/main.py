@@ -18,16 +18,16 @@ import json
 from deepagents import create_deep_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-from utils import get_model
-from scoring import get_churn_candidates
-from tools import get_user_tickets, get_user_reviews
-from prompts import (
+from .utils import get_model
+from .scoring import get_churn_candidates
+from .tools import get_user_tickets, get_user_reviews
+from .prompts import (
     RISK_RANKER_PROMPT,
     TICKET_PROMPT,
     REVIEW_PROMPT,
     SUPERVISOR_PROMPT,
 )
-from schemas import ChurnReport
+from .schemas import ChurnReport
 
 model = get_model()
 

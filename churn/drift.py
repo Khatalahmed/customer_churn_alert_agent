@@ -17,7 +17,7 @@ NOTE : psi() is kept at module level so tests can import it. The demo below
 """
 import numpy as np
 
-from features import build_features
+from .features import build_features
 
 
 def psi(baseline, new, bins: int = 10) -> float:

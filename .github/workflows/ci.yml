@@ -18,8 +18,8 @@ jobs:
 
       - name: Build data and train model
         run: |
-          uv run python quick_commerce_sim.py init
-          uv run python train_model.py
+          uv run python -m churn.quick_commerce_sim init
+          uv run python -m churn.train_model
 
       - name: Run tests
         run: uv run pytest -v
