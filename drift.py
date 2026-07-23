@@ -12,6 +12,8 @@ FLOW : baseline = the feature distribution the model was trained on ->
        features that drifted.
 LOGIC: PSI < 0.1 = stable; 0.1-0.2 = small shift; > 0.2 = significant drift
        (retrain). Here we simulate a "bad delivery month" to show it firing.
+NOTE : psi() is kept at module level so tests can import it. The demo below
+       only runs when this file is executed directly.
 """
 import numpy as np
 
@@ -36,32 +38,33 @@ def psi(baseline, new, bins: int = 10) -> float:
     return float(np.sum((n_pct - b_pct) * np.log(n_pct / b_pct)))
 
 
-df, cols = build_features()
-baseline = df[cols]
+if __name__ == "__main__":
+    df, cols = build_features()
+    baseline = df[cols]
 
-# --- simulate a "next month" batch where DELIVERY quality dropped ---
-# (a service incident: more cancellations and more unresolved tickets)
-new = baseline.copy()
-new["cancellation_rate"] = np.minimum(1.0, new["cancellation_rate"] + 0.20)
-new["unresolved_ticket_rate"] = np.minimum(1.0, new["unresolved_ticket_rate"] + 0.15)
+    # --- simulate a "next month" batch where DELIVERY quality dropped ---
+    # (a service incident: more cancellations and more unresolved tickets)
+    new = baseline.copy()
+    new["cancellation_rate"] = np.minimum(1.0, new["cancellation_rate"] + 0.20)
+    new["unresolved_ticket_rate"] = np.minimum(1.0, new["unresolved_ticket_rate"] + 0.15)
 
-print("=" * 60)
-print("DATA DRIFT CHECK  (PSI: baseline vs new batch)")
-print("=" * 60)
-drifted = []
-for c in cols:
-    val = psi(baseline[c], new[c])
-    if val > 0.2:
-        flag, _ = "DRIFT !!", drifted.append(c)
-    elif val > 0.1:
-        flag = "small shift"
+    print("=" * 60)
+    print("DATA DRIFT CHECK  (PSI: baseline vs new batch)")
+    print("=" * 60)
+    drifted = []
+    for c in cols:
+        val = psi(baseline[c], new[c])
+        if val > 0.2:
+            flag, _ = "DRIFT !!", drifted.append(c)
+        elif val > 0.1:
+            flag = "small shift"
+        else:
+            flag = "stable"
+        print(f"  {c:<26} PSI={val:5.3f}  {flag}")
+    print("-" * 60)
+    if drifted:
+        print(f"ACTION: {len(drifted)} feature(s) drifted -> RETRAIN the model.")
+        print(f"        drifted: {drifted}")
     else:
-        flag = "stable"
-    print(f"  {c:<26} PSI={val:5.3f}  {flag}")
-print("-" * 60)
-if drifted:
-    print(f"ACTION: {len(drifted)} feature(s) drifted -> RETRAIN the model.")
-    print(f"        drifted: {drifted}")
-else:
-    print("ACTION: no significant drift -> model is still valid.")
-print("=" * 60)
+        print("ACTION: no significant drift -> model is still valid.")
+    print("=" * 60)
