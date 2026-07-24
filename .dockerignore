@@ -1,0 +1,12 @@
+.venv
+.git
+__pycache__
+*.db
+.env
+*.pkl
+churn_truth.json
+churn_predictions.json
+churn_predictions_reviewed.json
+contacted.json
+retention_report.md
+docs

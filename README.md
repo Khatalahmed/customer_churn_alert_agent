@@ -68,6 +68,27 @@ top-15 by priority, achieving 100% precision. You raise `top_n` to trade cost fo
 Optimising for precision on high-value customers is deliberate — a wasted coupon is cheap,
 but a false "call this VIP" escalation erodes the team's trust in the system.
 
+### Per-archetype performance
+
+The simulator plants *typed* customers, so the model can be judged by **how** each customer
+churns — not just an average. Two churner types and two false-positive "traps":
+
+| Archetype | Churned? | n | Model flags | Meaning |
+|---|---|---|---|---|
+| cliff-dropper (sudden exit) | yes | 43 | **88%** | recall |
+| gradual-fader (slow decline) | yes | 35 | **91%** | recall |
+| vacationer (break, then returns) | no | 25 | **20%** | false-alarm |
+| loyal bulk-buyer (low frequency) | no | 26 | **15%** | false-alarm |
+| regular active | no | 171 | 5% | false-alarm |
+
+Two findings worth the whole exercise:
+- **Sudden and gradual churners are caught equally** (88% vs 91%) — because the model judges
+  *experience quality*, not activity *timing*, so the fade shape can't fool it. The
+  leakage-safe design (no recency features) is also what makes it robust to churn shape.
+- **It resists the traps.** A naive "no orders in 14 days" rule would false-alarm on **100%**
+  of the 51 vacationers + loyal buyers (they look dormant). The model flags only **15–20%** —
+  because it asks *"did they have a bad experience?"*, not *"are they quiet?"*.
+
 ---
 
 ## How it works
@@ -132,9 +153,16 @@ not assumed:
   a real finding: Groq's Llama-70B emitted malformed tool calls that broke the agent harness,
   while Gemini handled them — a genuine model/harness compatibility lesson.)
 
-- **Safety by data minimisation.** The agent's tools use a **read-only** database connection
-  and only ever return the fields needed for a decision — customer phone/email never reach
-  the LLM in the first place.
+- **Safety by data minimisation, plus defense-in-depth.** The agent's tools use a
+  **read-only** database connection and only return the fields needed for a decision — so
+  customer phone/email never reach the LLM in the first place. On top of that, a
+  **PII-redaction middleware** scrubs emails/phone numbers from every tool result before the
+  model sees it (a safety net; production would use Presidio's NER for names/addresses).
+
+- **Operations.** The whole system **containerises** (a `Dockerfile` bakes in the data +
+  trained model, runs with `docker run`), is **traced** end-to-end in **LangSmith** (every
+  LLM/sub-agent/tool call, latency + tokens, via one env var), reports **cost per run**
+  (~₹5/scan), and is guarded by a **pytest** suite in **GitHub Actions CI**.
 
 ---
 
@@ -181,8 +209,10 @@ customer_churn_alert_agent/
 │   ├── eval.py                # precision / recall vs planted ground truth
 │   ├── verifier.py            # fact-checks the agent's evidence against the DB
 │   ├── critic.py              # skeptical reviewer (multi-agent debate), self-measured
+│   ├── archetype_eval.py      # per-archetype recall + false-alarm on trap types
 │   ├── drift.py               # PSI data-drift detection
 │   ├── uplift.py              # retention uplift measurement (hold-out A/B)
+│   ├── pii.py                 # PII-redaction middleware (defense-in-depth)
 │   ├── report.py              # business-ready retention report (markdown)
 │   └── memory.py, mark_contacted.py  # contact log - no re-nagging across runs
 ├── tests/test_churn.py        # pytest suite (deterministic, no LLM)

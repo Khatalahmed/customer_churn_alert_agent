@@ -42,6 +42,10 @@ CHURN_FRACTION = 0.25               # (kept for reference, no longer used direct
 CHURN_MIN_WEEKS = 2                 # churned users inactive for >= 2 weeks
 CHURN_MAX_WEEKS = 8
 CHURN_THRESHOLD = 0.62              # NEW: unhappiness above this -> churn
+# NEW: churn ARCHETYPES (typed churners + false-positive traps)
+FADER_FRACTION = 0.45              # of churned, this share fade slowly (rest cliff-drop)
+VACATIONER_FRACTION = 0.12        # of NON-churned, take a recent break then return
+LOYAL_FRACTION = 0.10            # of NON-churned, low-frequency but still loyal
 RANDOM_SEED = 42                    # reproducible; set to None for true randomness
 if RANDOM_SEED is not None:
     random.seed(RANDOM_SEED)
@@ -322,13 +326,32 @@ def seed_customers(conn: sqlite3.Connection, n: int, history_days: int, now: dat
         # --- NEW: churn is CAUSED by unhappiness (plus a little luck) ---
         churn_roll = dissatisfaction + random.uniform(-0.12, 0.12)
         churned = churn_roll > CHURN_THRESHOLD
+        freq = random.choice([0.5, 1, 1.5, 2, 3, 4])   # orders/week
+        fade_start = vac_start = vac_end = None
         if churned:
             weeks_quiet = random.randint(CHURN_MIN_WEEKS, CHURN_MAX_WEEKS)
             active_until = now - timedelta(weeks=weeks_quiet)
             status = "ACTIVE"  # still active account, just dormant
+            # churned users are a sudden CLIFF-DROPPER or a slow GRADUAL-FADER
+            if random.random() < FADER_FRACTION:
+                archetype = "gradual_fader"
+                fade_start = active_until - timedelta(weeks=6)  # taper before silence
+            else:
+                archetype = "cliff_dropper"
         else:
             active_until = now
             status = random.choices(["ACTIVE", "SUSPENDED"], weights=[0.95, 0.05])[0]
+            # some NON-churned customers are false-positive TRAPS
+            roll = random.random()
+            if roll < VACATIONER_FRACTION:
+                archetype = "vacationer"        # a recent break, but they came back
+                vac_start = now - timedelta(weeks=random.randint(2, 3))
+                vac_end = now - timedelta(days=random.randint(1, 4))
+            elif roll < VACATIONER_FRACTION + LOYAL_FRACTION:
+                archetype = "loyal_bulk_buyer"  # orders rarely but is NOT leaving
+                freq = 0.5                       # low frequency -> looks dormant
+            else:
+                archetype = "regular_active"
 
         cur.execute(
             """INSERT INTO users (full_name, email, phone_number, password_hash,
@@ -354,12 +377,17 @@ def seed_customers(conn: sqlite3.Connection, n: int, history_days: int, now: dat
             "city": city,
             "device": random.choice(DEVICE_TYPES),
             # each customer has an intrinsic ordering frequency (orders/week)
-            "freq": random.choice([0.5, 1, 1.5, 2, 3, 4]),
+            "freq": freq,
             "address": f"{city}",
             # NEW: keep the drivers so backfill can shape this customer's data
             "delivery_pain": delivery_pain,
             "support_pain": support_pain,
             "pickiness": pickiness,
+            # NEW: archetype + its timing knobs (used by backfill + eval)
+            "archetype": archetype,
+            "fade_start": fade_start,
+            "vac_start": vac_start,
+            "vac_end": vac_end,
         })
     conn.commit()
     return customers
@@ -503,7 +531,15 @@ def backfill_history(conn, customers, product_ids, agent_ids, history_days, now)
                 continue
             if user["status"] == "SUSPENDED" and day > user["active_until"]:
                 continue
+            # NEW: vacationer takes a break in the middle, then returns
+            if user.get("vac_start") and user["vac_start"] <= day <= user["vac_end"]:
+                continue
             p_active = min(0.95, (user["freq"] / 7.0) * weekend_boost)
+            # NEW: gradual fader's activity decays to ~0 as they approach going silent
+            if user.get("fade_start") and day >= user["fade_start"]:
+                span = max((user["active_until"] - user["fade_start"]).days, 1)
+                elapsed = (day - user["fade_start"]).days
+                p_active *= max(0.0, 1 - elapsed / span)
             if random.random() > p_active:
                 continue
             made_order = random.random() < 0.7
@@ -546,6 +582,7 @@ def write_ground_truth(customers, path="churn_truth.json"):
         {
             "user_id": c["user_id"],
             "churned": c["churned"],
+            "archetype": c["archetype"],
             "active_until": iso(c["active_until"]),
             "delivery_pain": round(c["delivery_pain"], 3),
             "support_pain": round(c["support_pain"], 3),
@@ -556,8 +593,13 @@ def write_ground_truth(customers, path="churn_truth.json"):
     with open(path, "w") as f:
         json.dump(truth, f, indent=2)
     n_churned = sum(1 for c in customers if c["churned"])
+    # count each archetype so we can see the mix
+    counts = {}
+    for c in customers:
+        counts[c["archetype"]] = counts.get(c["archetype"], 0) + 1
     print(f"Ground truth written to {path}: "
           f"{n_churned} churned / {len(customers)} customers")
+    print(f"  archetypes: {counts}")
 
 # --------------------------------------------------------------------------- #
 # Commands

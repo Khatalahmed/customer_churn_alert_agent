@@ -61,3 +61,11 @@ def test_memory_roundtrip(tmp_path, monkeypatch):
     assert memory.recently_contacted_ids() == set()
     memory.mark_contacted([1, 2, 3])
     assert memory.recently_contacted_ids() == {1, 2, 3}
+
+def test_pii_redaction():
+    from churn.pii import redact
+    dirty = "Contact Sameer at 9876543210 or sameer@example.com today"
+    clean = redact(dirty)
+    assert "9876543210" not in clean          # phone gone
+    assert "sameer@example.com" not in clean   # email gone
+    assert "[PHONE]" in clean and "[EMAIL]" in clean

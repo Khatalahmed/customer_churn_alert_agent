@@ -12,12 +12,14 @@ FLOW : build model -> define the sub-agents (risk-ranker, ticket, review) ->
        predictions -> print the token cost of the run.
 LOGIC: a sub-agent's "description" tells the MANAGER when to call it. A
        sub-agent's "system_prompt" tells the SUB-AGENT how to do its job.
+       Each sub-agent runs a PII-redaction middleware on its tool outputs.
 """
 import json
 
 from deepagents import create_deep_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
+from .pii import PIIRedactionMiddleware
 from .utils import get_model
 from .scoring import get_churn_candidates
 from .tools import get_user_tickets, get_user_reviews
@@ -31,6 +33,9 @@ from .schemas import ChurnReport
 
 model = get_model()
 
+# one PII-redaction middleware instance, shared by all sub-agents
+pii_mw = PIIRedactionMiddleware()
+
 # The three sub-agents. Each is a simple dictionary. The manager calls them
 # by name through its built-in "task" tool.
 subagents = [
@@ -43,6 +48,7 @@ subagents = [
         ),
         "system_prompt": RISK_RANKER_PROMPT,
         "tools": [get_churn_candidates],
+        "middleware": [pii_mw],
     },
     {
         "name": "ticket-analyst",
@@ -52,6 +58,7 @@ subagents = [
         ),
         "system_prompt": TICKET_PROMPT,
         "tools": [get_user_tickets],
+        "middleware": [pii_mw],
     },
     {
         "name": "review-analyst",
@@ -61,6 +68,7 @@ subagents = [
         ),
         "system_prompt": REVIEW_PROMPT,
         "tools": [get_user_reviews],
+        "middleware": [pii_mw],
     },
 ]
 
