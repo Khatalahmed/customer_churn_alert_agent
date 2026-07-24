@@ -53,7 +53,9 @@ the final decision** — the agent even *overrides* the model when the evidence 
 ## Results
 
 Measured on a held-out test set and against planted ground truth (the simulator knows
-exactly who churned):
+exactly who churned). *Numbers below are from representative runs; because the simulator
+uses a wall-clock reference, regenerating the data shifts them slightly (e.g. AUC lands in
+the 0.70–0.75 range, churner count ~68–78) — see Limitations.*
 
 | Metric | Value | What it means |
 |---|---|---|
