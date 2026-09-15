@@ -16,24 +16,25 @@ LOGIC: We query the database ourselves, on purpose, so the check does not
 """
 import json
 
-from .config import PREDICTIONS_PATH, connect_readonly
+from .config import PREDICTIONS_PATH, connect_readonly, reference_now
 
 
 def real_facts(conn, user_id):
     """Compute the true five numbers for one user, straight from the DB."""
+    ref = reference_now(conn)   # the data's own "now", not the wall clock
     cur = conn.cursor()
     prev = cur.execute(
         """SELECT COUNT(*) FROM auth_audit_log
            WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp BETWEEN datetime('now','-60 days')
-                                     AND datetime('now','-30 days')""",
-        (user_id,),
+             AND event_timestamp BETWEEN datetime(?,'-60 days')
+                                     AND datetime(?,'-30 days')""",
+        (user_id, ref, ref),
     ).fetchone()[0]
     recent = cur.execute(
         """SELECT COUNT(*) FROM auth_audit_log
            WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp >= datetime('now','-30 days')""",
-        (user_id,),
+             AND event_timestamp >= datetime(?,'-30 days')""",
+        (user_id, ref),
     ).fetchone()[0]
     orders = cur.execute(
         "SELECT COUNT(*) FROM orders WHERE user_id=?", (user_id,)

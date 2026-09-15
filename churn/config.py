@@ -23,6 +23,25 @@ CONTACTED_PATH = DATA_DIR / "contacted.json"
 REPORT_PATH = DATA_DIR / "retention_report.md"
 
 
+def reference_now(conn: sqlite3.Connection) -> str:
+    """The simulation's "now" (UTC, 'YYYY-MM-DD HH:MM:SS'), stored in the DB.
+
+    Time-window queries use datetime(reference_now, '-30 days') instead of
+    SQLite's wall-clock datetime('now'), so a database gives the same answers
+    no matter when it is queried.
+    """
+    try:
+        row = conn.execute(
+            "SELECT value FROM sim_meta WHERE key = 'reference_now'"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    if row is None:
+        raise RuntimeError("database has no reference time - regenerate it with "
+                           "`python -m churn.quick_commerce_sim init`")
+    return row[0]
+
+
 def connect_readonly(path=None) -> sqlite3.Connection:
     """Open the database read-only: readers can look but never write.
 

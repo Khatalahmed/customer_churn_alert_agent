@@ -191,11 +191,12 @@ def test_oof_probabilities_cover_every_customer():
     assert ((oof > 0) & (oof < 1)).all()
 
 
-def test_no_timestamps_in_the_future():
-    # timestamps must be UTC (to match SQLite's datetime('now')) and never
-    # later than now - otherwise the login windows in the tools are shifted
-    from churn.config import connect_readonly
+def test_no_timestamps_after_reference_time():
+    # timestamps must be UTC (like the stored reference time) and never later
+    # than it - otherwise the login windows in the tools are shifted
+    from churn.config import connect_readonly, reference_now
     conn = connect_readonly()
+    ref = reference_now(conn)
     checks = {
         "auth_audit_log": "event_timestamp",
         "orders": "placed_at",
@@ -204,10 +205,30 @@ def test_no_timestamps_in_the_future():
     }
     for table, col in checks.items():
         future = conn.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE {col} > datetime('now')"
+            f"SELECT COUNT(*) FROM {table} WHERE {col} > ?", (ref,)
         ).fetchone()[0]
-        assert future == 0, f"{future} rows in {table}.{col} are in the future"
+        assert future == 0, f"{future} rows in {table}.{col} are after the reference time"
     conn.close()
+
+
+def test_simulator_is_reproducible(tmp_path):
+    # same seed + frozen reference time -> identical data on every run
+    import sqlite3
+    import churn.quick_commerce_sim as sim
+
+    def dump(db):
+        conn = sqlite3.connect(db)
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+        rows = {t: conn.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in tables}
+        conn.close()
+        return rows
+
+    for name in ["a", "b"]:
+        sim.cmd_init(tmp_path / f"{name}.db", sim.DEFAULT_HISTORY_DAYS,
+                     truth_path=tmp_path / f"{name}.json")
+    assert dump(tmp_path / "a.db") == dump(tmp_path / "b.db")
+    assert (tmp_path / "a.json").read_text() == (tmp_path / "b.json").read_text()
 
 
 def test_iso_converts_ist_to_utc_and_caps_at_now(monkeypatch):

@@ -19,26 +19,27 @@ import pandas as pd
 from langchain.tools import tool
 
 from .features import build_features
-from .config import MODEL_PATH, connect_readonly
+from .config import MODEL_PATH, connect_readonly, reference_now
 from .memory import recently_contacted_ids
 
 
 def _login_trend(user_id: int):
     """Return (logins 30-60 days ago, logins in the last 30 days) for one user."""
     conn = connect_readonly()
+    ref = reference_now(conn)   # the data's own "now", not the wall clock
     cur = conn.cursor()
     prev = cur.execute(
         """SELECT COUNT(*) FROM auth_audit_log
            WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp BETWEEN datetime('now','-60 days')
-                                     AND datetime('now','-30 days')""",
-        (user_id,),
+             AND event_timestamp BETWEEN datetime(?,'-60 days')
+                                     AND datetime(?,'-30 days')""",
+        (user_id, ref, ref),
     ).fetchone()[0]
     recent = cur.execute(
         """SELECT COUNT(*) FROM auth_audit_log
            WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp >= datetime('now','-30 days')""",
-        (user_id,),
+             AND event_timestamp >= datetime(?,'-30 days')""",
+        (user_id, ref),
     ).fetchone()[0]
     conn.close()
     return prev, recent

@@ -99,11 +99,11 @@ The simulator plants five customer types. Two really churn; two are **traps** th
 Measured **out-of-fold** (5-fold CV, each customer scored by a model that never saw them;
 mean over 10 fold seeds):
 
-- **Gradual faders are caught more often than cliff-droppers** (61% vs 42% at a 0.5
+- **Gradual faders are caught more often than cliff-droppers** (55% vs 39% at a 0.5
   threshold). Recall at a fixed threshold is modest — the pipeline relies on *ranking*
   the top 15, not on the threshold.
-- **The traps are the weak spot.** Vacationers (42%) and loyal low-frequency buyers (36%)
-  are flagged at ~2.5× the rate of regular customers (15%). A likely cause: they have few
+- **The traps are the weak spot.** Loyal low-frequency buyers (45%) and vacationers (30%)
+  are flagged at 2–3× the rate of regular customers (15%). A likely cause: they have few
   orders and reviews, so their rate features are noisy. This is exactly where the agent's
   ticket/review check has to earn its keep.
 
@@ -118,8 +118,9 @@ customers). `churn.archetype_eval` now prints both columns so the gap stays visi
 Every feature is a **rate or average** (cancellation rate, unresolved-ticket rate, review
 score) — never a raw count. Raw counts leak the answer; rates capture the *cause*.
 
-<sub>*Numbers are from representative runs; the simulator uses a wall-clock reference, so
-regenerating shifts them slightly (AUC 0.70–0.75). See [Limitations](#limitations).*</sub>
+<sub>*Numbers are exactly reproducible: the simulator uses a fixed seed and a frozen reference
+time (2026-09-01 12:00 IST) stored in the database, so every regeneration gives the same data
+and the same model (test AUC 0.729).*</sub>
 
 ---
 
@@ -206,7 +207,7 @@ docker build -t churn-agent . && docker run --rm churn-agent uv run python -m ch
 ## Limitations
 
 - **Synthetic data** — no real users. Results are framed as engineering + eval quality, never business impact.
-- **Reproducibility** — wall-clock "now" shifts counts day to day (labels are seed-fixed). A frozen timestamp is a known fix.
+- **Frozen clock** — the data lives at a fixed reference time (stored in the DB, used by every time-window query) so results are reproducible. `quick_commerce_sim init --now wallclock` restores live timing, at the cost of reproducibility.
 - **Not million-scale** — per-customer LLM investigation suits top-N triage; the ML layer keeps the agent's workload bounded.
 
 ---

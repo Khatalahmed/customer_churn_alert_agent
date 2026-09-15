@@ -19,6 +19,7 @@ USAGE
 -----
     python -m churn.quick_commerce_sim init
     python -m churn.quick_commerce_sim init --db ./qcommerce.db --days 150
+    python -m churn.quick_commerce_sim init --now wallclock   # not reproducible
     python -m churn.quick_commerce_sim live --db ./qcommerce.db --interval 2 --ticks 60
     python -m churn.quick_commerce_sim all --db ./qcommerce.db --days 120
 """
@@ -32,7 +33,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from .config import DB_PATH, TRUTH_PATH
+from .config import DB_PATH, TRUTH_PATH, reference_now
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -49,8 +50,10 @@ FADER_FRACTION = 0.45              # of churned, this share fade slowly (rest cl
 VACATIONER_FRACTION = 0.12        # of NON-churned, take a recent break then return
 LOYAL_FRACTION = 0.10            # of NON-churned, low-frequency but still loyal
 RANDOM_SEED = 42                    # reproducible; set to None for true randomness
-if RANDOM_SEED is not None:
-    random.seed(RANDOM_SEED)
+# NEW: frozen simulation "now" (IST). Together with RANDOM_SEED this makes the
+# generated data identical on every run. It is stored in the DB (sim_meta) and
+# every time-window query reads it instead of SQLite's wall-clock datetime('now').
+REFERENCE_NOW = datetime(2026, 9, 1, 12, 0, 0)
 IST = timezone(timedelta(hours=5, minutes=30))  # Indian Standard Time
 
 # --------------------------------------------------------------------------- #
@@ -127,12 +130,13 @@ def iso(dt: datetime) -> str:
     """Store timestamps as UTC ISO strings (SQLite has no native datetime type).
 
     The simulation runs in naive IST so ordering hours look realistic, but
-    SQLite's datetime('now') - used by every query - is UTC. This is the one
-    storage boundary, so we fix both problems here:
+    stored times are UTC (SQLite's convention). This is the one storage
+    boundary, so we fix both problems here:
       1. cap at SIM_NOW: business_hour_time() picks a random hour on a date,
          which for today (or a ticket/review dated a day ahead) can land in
          the future. min() keeps event order (login <= logout, etc.).
-      2. convert IST -> UTC so datetime('now', '-30 days') windows line up.
+      2. convert IST -> UTC so the stored reference time and every event use
+         the same clock.
     """
     if SIM_NOW is not None:
         dt = min(dt, SIM_NOW)
@@ -246,6 +250,10 @@ CREATE TABLE IF NOT EXISTS reviews (
     helpful_count        INTEGER NOT NULL DEFAULT 0,
     created_at           TEXT    NOT NULL,
     UNIQUE (user_id, product_id, order_id)
+);
+CREATE TABLE IF NOT EXISTS sim_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL          -- reference_now: the simulation's "now" (UTC)
 );
 CREATE INDEX IF NOT EXISTS idx_auth_log_user      ON auth_audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_log_time      ON auth_audit_log(event_timestamp);
@@ -417,7 +425,8 @@ def gen_login_session(conn, user, day, made_order: bool):
     cur = conn.cursor()
     device = user["device"]
     login_time = business_hour_time(day)
-    session_id = str(uuid.uuid4())
+    # drawn from the seeded generator (not uuid4) so the data is reproducible
+    session_id = str(uuid.UUID(int=random.getrandbits(128), version=4))
     ip = rand_ip()
     dinfo = random.choice(DEVICE_INFO[device])
     ver = random.choice(APP_VERSIONS)
@@ -621,15 +630,25 @@ def write_ground_truth(customers, path=TRUTH_PATH):
 # --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
-def cmd_init(db_path, history_days, fresh=True):
+def set_reference_now(conn, now: datetime) -> None:
+    """Store the simulation's "now" (as UTC) so every reader uses the same clock."""
+    conn.execute("INSERT OR REPLACE INTO sim_meta (key, value) VALUES ('reference_now', ?)",
+                 (iso(now),))
+    conn.commit()
+
+def cmd_init(db_path, history_days, fresh=True, now=None, truth_path=TRUTH_PATH):
     global PRODUCT_PRICE_BY_ID, SIM_NOW
+    if RANDOM_SEED is not None:
+        random.seed(RANDOM_SEED)   # reseed per run: same seed + same now -> same data
     if fresh and os.path.exists(db_path):
         os.remove(db_path)
         print(f"Removed existing {db_path}")
     conn = connect(db_path)
     create_schema(conn)
-    now = datetime.now(IST).replace(tzinfo=None)
+    now = now or REFERENCE_NOW
     SIM_NOW = now
+    set_reference_now(conn, now)
+    print(f"Reference time (IST): {now:%Y-%m-%d %H:%M}")
     product_ids = seed_products(conn)
     cur = conn.cursor()
     cur.execute("SELECT product_id, price FROM products")
@@ -637,18 +656,27 @@ def cmd_init(db_path, history_days, fresh=True):
     agent_ids = seed_staff(conn, now)
     customers = seed_customers(conn, NUM_CUSTOMERS, history_days, now)
     backfill_history(conn, customers, product_ids, agent_ids, history_days, now)
-    write_ground_truth(customers)
+    write_ground_truth(customers, truth_path)
     print_summary(conn)
     conn.close()
     print(f"\nDatabase ready at: {os.path.abspath(db_path)}")
 
 def cmd_live(db_path, interval, ticks):
-    """Simulate live traffic on an existing DB."""
+    """Simulate live traffic on an existing DB.
+
+    Time is SIMULATED: it starts at the DB's stored reference time and each
+    tick advances it by one minute (the real `interval` only paces the
+    output). The new reference time is saved at the end, so the DB stays
+    consistent with its own clock.
+    """
     global PRODUCT_PRICE_BY_ID, SIM_NOW
     if not os.path.exists(db_path):
         print(f"DB {db_path} not found. Run `init` first.")
         return
+    if RANDOM_SEED is not None:
+        random.seed(RANDOM_SEED + 1)
     conn = connect(db_path)
+    start = datetime.fromisoformat(reference_now(conn)) + IST.utcoffset(None)  # UTC -> IST
     cur = conn.cursor()
     cur.execute("SELECT product_id, price FROM products")
     PRODUCT_PRICE_BY_ID = dict(cur.fetchall())
@@ -662,7 +690,7 @@ def cmd_live(db_path, interval, ticks):
     print(f"Live simulation: {ticks} ticks every {interval}s "
           f"({len(active)} active customers)...")
     for t in range(ticks):
-        now = datetime.now(IST).replace(tzinfo=None)
+        now = start + timedelta(minutes=t + 1)
         SIM_NOW = now
         burst = random.randint(1, max(2, len(active) // 8))
         for user in random.sample(active, min(burst, len(active))):
@@ -678,6 +706,8 @@ def cmd_live(db_path, interval, ticks):
         print(f"  tick {t+1}/{ticks}  ({now:%H:%M:%S})  +{burst} sessions")
         if t < ticks - 1:
             time.sleep(interval)
+    if ticks:
+        set_reference_now(conn, now)
     print_summary(conn)
     conn.close()
 
@@ -693,9 +723,9 @@ def print_summary(conn):
           AND NOT EXISTS (
               SELECT 1 FROM orders o
               WHERE o.user_id=u.user_id
-                AND o.placed_at >= datetime('now','-14 days')
+                AND o.placed_at >= datetime(?,'-14 days')
           )
-    """).fetchone()
+    """, (reference_now(conn),)).fetchone()
     total_cust = cur.execute("SELECT COUNT(*) FROM users WHERE user_type='CUSTOMER'").fetchone()[0]
     print(f"\n  Customers with NO orders in last 14 days: {row[0]} / {total_cust} (churned/dormant)")
     span = cur.execute("""SELECT MIN(placed_at), MAX(placed_at) FROM orders""").fetchone()
@@ -704,12 +734,24 @@ def print_summary(conn):
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+NOW_HELP = ("reference time in IST, 'YYYY-MM-DD HH:MM' (default: the frozen "
+            "REFERENCE_NOW), or 'wallclock' for the current time")
+
+def parse_now(value):
+    """--now value -> naive IST datetime, or None for the frozen default."""
+    if value is None:
+        return None
+    if value == "wallclock":
+        return datetime.now(IST).replace(tzinfo=None, microsecond=0)
+    return datetime.fromisoformat(value)
+
 def main():
     p = argparse.ArgumentParser(description="Quick-commerce SQLite data simulator")
     sub = p.add_subparsers(dest="command", required=True)
     p_init = sub.add_parser("init", help="Create DB + backfill history")
     p_init.add_argument("--db", default=DEFAULT_DB_PATH)
     p_init.add_argument("--days", type=int, default=DEFAULT_HISTORY_DAYS)
+    p_init.add_argument("--now", default=None, help=NOW_HELP)
     p_live = sub.add_parser("live", help="Simulate live traffic on existing DB")
     p_live.add_argument("--db", default=DEFAULT_DB_PATH)
     p_live.add_argument("--interval", type=float, default=2.0, help="seconds between ticks")
@@ -719,13 +761,14 @@ def main():
     p_all.add_argument("--days", type=int, default=DEFAULT_HISTORY_DAYS)
     p_all.add_argument("--interval", type=float, default=2.0)
     p_all.add_argument("--ticks", type=int, default=15)
+    p_all.add_argument("--now", default=None, help=NOW_HELP)
     args = p.parse_args()
     if args.command == "init":
-        cmd_init(args.db, args.days)
+        cmd_init(args.db, args.days, now=parse_now(args.now))
     elif args.command == "live":
         cmd_live(args.db, args.interval, args.ticks)
     elif args.command == "all":
-        cmd_init(args.db, args.days)
+        cmd_init(args.db, args.days, now=parse_now(args.now))
         cmd_live(args.db, args.interval, args.ticks)
 
 if __name__ == "__main__":

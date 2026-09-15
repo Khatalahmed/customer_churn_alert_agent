@@ -138,8 +138,9 @@
 - First run reported 88% / 91% recall and 15–20% trap false-alarms. That scored customers with the saved model, which had **trained on 75% of them**.
 
 **Correction (out-of-fold):** `archetype_eval.py` switched to 5-fold cross-validation, so every customer is scored by a model that never saw them (mean over 10 fold seeds):
-- Recall at threshold 0.5: gradual-faders **61%**, cliff-droppers **42%**.
-- Traps are the weak spot: vacationers **42%** and loyal buyers **36%** flagged, vs **15%** of regular customers — likely because few orders/reviews make their rate features noisy.
+- Recall at threshold 0.5: gradual-faders **55%**, cliff-droppers **39%**.
+- Traps are the weak spot: loyal buyers **45%** and vacationers **30%** flagged, vs **15%** of regular customers — likely because few orders/reviews make their rate features noisy.
+- These are the final, reproducible numbers. Before the simulator's clock was frozen, trap rates moved by up to ~20 points between regenerations (e.g. vacationers 42% on one dataset, 24% on the next) — which is why the reference time is now fixed and stored in the database.
 - Lesson: an in-sample number quietly looked great. The script now prints both columns so the gap can't hide again.
 
 ---

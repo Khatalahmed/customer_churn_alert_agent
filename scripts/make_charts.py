@@ -51,10 +51,11 @@ plt.close(fig)
 # 2. Per-archetype: recall (churners) vs false-alarm (traps)
 #    Out-of-fold values (5-fold CV, mean over 10 fold seeds) from
 #    churn.archetype_eval - NOT the in-sample numbers of the saved model.
+#    Exact for the frozen-reference-time dataset (reproducible).
 # --------------------------------------------------------------------------- #
 labels = ["cliff-dropper\n(churner)", "gradual-fader\n(churner)",
           "vacationer\n(trap)", "loyal buyer\n(trap)", "regular\nactive"]
-rates = [42, 61, 42, 36, 15]
+rates = [39, 55, 30, 45, 15]
 colors = ["#16a34a", "#16a34a", "#dc2626", "#dc2626", "#94a3b8"]
 
 fig, ax = plt.subplots(figsize=(7.4, 3.8))
