@@ -62,6 +62,34 @@ def test_token_prices_come_from_env(monkeypatch):
     assert token_prices() == (0.5, 1.5)
 
 
+def test_azure_provider_is_keyless_and_configured_from_env(monkeypatch):
+    import pytest
+    from langchain_openai import AzureChatOpenAI, ChatOpenAI
+    from churn.utils import get_model
+    monkeypatch.setenv("MODEL_PROVIDER", "azure")
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com/")
+    monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "test-deployment")
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+
+    # v1 API (the default): OpenAI-compatible URL, deployment as the model name
+    monkeypatch.delenv("AZURE_OPENAI_API_VERSION", raising=False)
+    model = get_model()                          # builds offline; token fetched lazily
+    assert type(model) is ChatOpenAI
+    assert model.openai_api_base == "https://example.openai.azure.com/openai/v1/"
+    assert model.model_name == "test-deployment"
+
+    # a dated API version uses the classic Azure client, still keyless
+    monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
+    model = get_model()
+    assert isinstance(model, AzureChatOpenAI)
+    assert model.deployment_name == "test-deployment"
+    assert model.azure_ad_token_provider is not None   # Entra ID, not an API key
+
+    monkeypatch.delenv("AZURE_OPENAI_DEPLOYMENT")
+    with pytest.raises(ValueError, match="AZURE_OPENAI_DEPLOYMENT"):
+        get_model()
+
+
 def test_psi_stable_is_near_zero():
     x = pd.Series(np.random.RandomState(0).normal(size=500))
     assert psi(x, x) < 0.01

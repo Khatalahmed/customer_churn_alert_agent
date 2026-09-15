@@ -20,6 +20,14 @@ from langchain_core.language_models import BaseChatModel
 load_dotenv()
 
 
+def _require(name: str) -> str:
+    """Read a required setting, with a clear message instead of a vague SDK error."""
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"{name} is not set - add it to .env (see .env.example)")
+    return value
+
+
 def get_model() -> BaseChatModel:
     """Return the LLM chosen by MODEL_PROVIDER in the .env file."""
     provider = os.getenv("MODEL_PROVIDER", "groq").lower()
@@ -43,6 +51,37 @@ def get_model() -> BaseChatModel:
             model=model_name,
             api_key=os.getenv("GROQ_API_KEY"),
             temperature=0,
+        )
+
+    if provider == "azure":
+        # Azure OpenAI with KEYLESS auth (Microsoft Entra ID). There is no API
+        # key to leak: DefaultAzureCredential uses your `az login` session
+        # locally, and a managed identity when deployed on Azure. The identity
+        # needs the "Cognitive Services OpenAI User" role on the resource.
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+        token_provider = get_bearer_token_provider(
+            DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+        )
+        endpoint = _require("AZURE_OPENAI_ENDPOINT")
+        deployment = _require("AZURE_OPENAI_DEPLOYMENT")
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION") or "v1"
+        # no temperature: newer (reasoning) deployments reject anything but the default
+        if api_version == "v1":
+            # v1 API: OpenAI-compatible URL (/openai/v1/), no dated api-version,
+            # and the deployment name is passed as the model
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                base_url=endpoint.rstrip("/") + "/openai/v1/",
+                api_key=token_provider,
+                model=deployment,
+            )
+        # older dated API versions, e.g. 2024-10-21
+        from langchain_openai import AzureChatOpenAI
+        return AzureChatOpenAI(
+            azure_endpoint=endpoint,
+            azure_deployment=deployment,
+            api_version=api_version,
+            azure_ad_token_provider=token_provider,
         )
 
     if provider == "google":
