@@ -19,8 +19,9 @@ import json
 from deepagents import create_deep_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
+from .config import PREDICTIONS_PATH
 from .pii import PIIRedactionMiddleware
-from .utils import get_model
+from .utils import get_model, token_prices
 from .scoring import get_churn_candidates
 from .tools import get_user_tickets, get_user_reviews
 from .prompts import (
@@ -31,14 +32,12 @@ from .prompts import (
 )
 from .schemas import ChurnReport
 
-model = get_model()
-
 # one PII-redaction middleware instance, shared by all sub-agents
 pii_mw = PIIRedactionMiddleware()
 
 # The three sub-agents. Each is a simple dictionary. The manager calls them
 # by name through its built-in "task" tool.
-subagents = [
+SUBAGENTS = [
     {
         "name": "risk-ranker",
         "description": (
@@ -72,15 +71,18 @@ subagents = [
     },
 ]
 
-# The deep agent. It gets NO database tools of its own (tools=[]). It only
-# plans and delegates to the sub-agents above.
-agent = create_deep_agent(
-    model=model,
-    tools=[],
-    system_prompt=SUPERVISOR_PROMPT,
-    subagents=subagents,
-    response_format=ChurnReport,          # forces structured output
-)
+def build_agent():
+    """Build the deep agent. Called at run time, so importing this module
+    needs no API key."""
+    # It gets NO database tools of its own (tools=[]). It only plans and
+    # delegates to the sub-agents above.
+    return create_deep_agent(
+        model=get_model(),
+        tools=[],
+        system_prompt=SUPERVISOR_PROMPT,
+        subagents=SUBAGENTS,
+        response_format=ChurnReport,          # forces structured output
+    )
 
 
 def extract_text(message) -> str:
@@ -111,7 +113,7 @@ if __name__ == "__main__":
 
     # a callback that records how many tokens every model call used
     usage_cb = UsageMetadataCallbackHandler()
-    result = agent.invoke(
+    result = build_agent().invoke(
         {"messages": [{"role": "user", "content": task}]},
         config={"callbacks": [usage_cb]},
     )
@@ -130,19 +132,15 @@ if __name__ == "__main__":
 
     # Save the machine-readable predictions for the eval and verifier scripts.
     predictions = [a.model_dump() for a in report.assessments]
-    with open("churn_predictions.json", "w") as f:
+    with open(PREDICTIONS_PATH, "w") as f:
         json.dump(predictions, f, indent=2)
-    print(f"\nSaved {len(predictions)} predictions to churn_predictions.json")
+    print(f"\nSaved {len(predictions)} predictions to {PREDICTIONS_PATH}")
 
-    # --- cost of this run (token usage x approximate Gemini Flash pricing) ---
-    # NOTE: rates are approximate - adjust to your provider's current pricing.
-    PRICE_IN_PER_M = 0.15    # USD per 1M input tokens
-    PRICE_OUT_PER_M = 0.60   # USD per 1M output tokens
+    # --- cost of this run (token usage x the provider prices set in .env) ---
     USD_TO_INR = 83
 
     in_tok = sum(u.get("input_tokens", 0) for u in usage_cb.usage_metadata.values())
     out_tok = sum(u.get("output_tokens", 0) for u in usage_cb.usage_metadata.values())
-    cost_usd = (in_tok / 1_000_000) * PRICE_IN_PER_M + (out_tok / 1_000_000) * PRICE_OUT_PER_M
 
     print("\n" + "=" * 70)
     print("RUN COST")
@@ -150,4 +148,11 @@ if __name__ == "__main__":
     print(f"Input tokens:  {in_tok:>8,}")
     print(f"Output tokens: {out_tok:>8,}")
     print(f"Total tokens:  {in_tok + out_tok:>8,}")
-    print(f"Estimated cost: ${cost_usd:.4f}  (~Rs {cost_usd * USD_TO_INR:.2f}) per scan")
+    prices = token_prices()
+    if prices:
+        price_in, price_out = prices
+        cost_usd = (in_tok / 1_000_000) * price_in + (out_tok / 1_000_000) * price_out
+        print(f"Estimated cost: ${cost_usd:.4f}  (~Rs {cost_usd * USD_TO_INR:.2f}) per scan")
+    else:
+        print("Estimated cost: unknown - set MODEL_PRICE_IN_PER_M and "
+              "MODEL_PRICE_OUT_PER_M (USD per 1M tokens) in .env for your model")

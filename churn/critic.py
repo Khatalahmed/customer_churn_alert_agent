@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .utils import get_model
+from .config import PREDICTIONS_PATH, REVIEWED_PATH, TRUTH_PATH
 
 
 class CriticVerdict(BaseModel):
@@ -38,31 +38,19 @@ False-alarm patterns to watch for:
 
 Keep HIGH only if the evidence clearly supports it. Otherwise lower it."""
 
-critic = get_model().with_structured_output(CriticVerdict)
 
-with open("churn_predictions.json") as f:
-    preds = json.load(f)
-with open("churn_truth.json") as f:
-    truth = json.load(f)
-churned = {r["user_id"] for r in truth if r["churned"]}
-
-reviewed = []
-print("Critic reviewing each verdict...\n")
-for p in preds:
-    msg = (f"{CRITIC_PROMPT}\n\n"
-           f"Customer: {p['full_name']} (#{p['user_id']})\n"
-           f"Current risk: {p['risk_level']}\n"
-           f"ML churn probability: {p['churn_probability']}\n"
-           f"Evidence: {json.dumps(p['evidence'])}\n"
-           f"Analyst reason: {p['reason']}")
-    v = critic.invoke(msg)
-    if v.risk_level != p["risk_level"]:
-        print(f"  CHANGED user {p['user_id']:>3} {p['full_name']:<18} "
-              f"{p['risk_level']} -> {v.risk_level}  ({v.critique})")
-    reviewed.append({**p, "risk_level": v.risk_level, "critique": v.critique})
+def critic_message(p: dict) -> str:
+    """The prompt the critic sees for one prediction."""
+    return (f"{CRITIC_PROMPT}\n\n"
+            f"Customer: {p['full_name']} (#{p['user_id']})\n"
+            f"Current risk: {p['risk_level']}\n"
+            f"ML churn probability: {p['churn_probability']}\n"
+            f"Evidence: {json.dumps(p['evidence'])}\n"
+            f"Analyst reason: {p['reason']}")
 
 
-def precision(pred_list):
+def precision(pred_list, churned: set):
+    """Return (precision, true positives, flagged count) for HIGH/MEDIUM flags."""
     flagged = {p["user_id"] for p in pred_list if p["risk_level"] in ("HIGH", "MEDIUM")}
     if not flagged:
         return 0.0, 0, 0
@@ -70,15 +58,39 @@ def precision(pred_list):
     return tp / len(flagged), tp, len(flagged)
 
 
-p_before, tp_b, n_b = precision(preds)
-p_after, tp_a, n_a = precision(reviewed)
+def main():
+    from .utils import get_model
 
-print("\n" + "=" * 55)
-print("CRITIC IMPACT (precision = flagged that truly churned)")
-print("=" * 55)
-print(f"Before critic: precision {p_before:.2f}  ({tp_b}/{n_b} flagged)")
-print(f"After  critic: precision {p_after:.2f}  ({tp_a}/{n_a} flagged)")
+    critic = get_model().with_structured_output(CriticVerdict)
 
-with open("churn_predictions_reviewed.json", "w") as f:
-    json.dump(reviewed, f, indent=2)
-print("\nSaved reviewed verdicts to churn_predictions_reviewed.json")
+    with open(PREDICTIONS_PATH) as f:
+        preds = json.load(f)
+    with open(TRUTH_PATH) as f:
+        truth = json.load(f)
+    churned = {r["user_id"] for r in truth if r["churned"]}
+
+    reviewed = []
+    print("Critic reviewing each verdict...\n")
+    for p in preds:
+        v = critic.invoke(critic_message(p))
+        if v.risk_level != p["risk_level"]:
+            print(f"  CHANGED user {p['user_id']:>3} {p['full_name']:<18} "
+                  f"{p['risk_level']} -> {v.risk_level}  ({v.critique})")
+        reviewed.append({**p, "risk_level": v.risk_level, "critique": v.critique})
+
+    p_before, tp_b, n_b = precision(preds, churned)
+    p_after, tp_a, n_a = precision(reviewed, churned)
+
+    print("\n" + "=" * 55)
+    print("CRITIC IMPACT (precision = flagged that truly churned)")
+    print("=" * 55)
+    print(f"Before critic: precision {p_before:.2f}  ({tp_b}/{n_b} flagged)")
+    print(f"After  critic: precision {p_after:.2f}  ({tp_a}/{n_a} flagged)")
+
+    with open(REVIEWED_PATH, "w") as f:
+        json.dump(reviewed, f, indent=2)
+    print(f"\nSaved reviewed verdicts to {REVIEWED_PATH}")
+
+
+if __name__ == "__main__":
+    main()

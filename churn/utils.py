@@ -54,3 +54,18 @@ def get_model() -> BaseChatModel:
         )
 
     raise ValueError(f"Unknown MODEL_PROVIDER: {provider}")
+
+
+def token_prices() -> tuple[float, float] | None:
+    """(USD per 1M input tokens, USD per 1M output tokens) from .env, or None.
+
+    Prices differ per provider and model and change over time, so they are
+    configuration, not code - the same rule as MODEL_PROVIDER. Set
+    MODEL_PRICE_IN_PER_M and MODEL_PRICE_OUT_PER_M from your provider's
+    current pricing page.
+    """
+    price_in = os.getenv("MODEL_PRICE_IN_PER_M")
+    price_out = os.getenv("MODEL_PRICE_OUT_PER_M")
+    if not price_in or not price_out:
+        return None
+    return float(price_in), float(price_out)

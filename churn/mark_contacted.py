@@ -9,11 +9,18 @@ FLOW : read churn_predictions.json -> mark each user_id as contacted.
 """
 import json
 
+from .config import PREDICTIONS_PATH
 from .memory import mark_contacted
 
-with open("churn_predictions.json") as f:
-    preds = json.load(f)
 
-ids = [p["user_id"] for p in preds]
-n = mark_contacted(ids)
-print(f"Marked {n} customers as contacted. Future runs will skip them for 30 days.")
+def main():
+    with open(PREDICTIONS_PATH) as f:
+        preds = json.load(f)
+
+    ids = [p["user_id"] for p in preds]
+    n = mark_contacted(ids)
+    print(f"Marked {n} customers as contacted. Future runs will skip them for 30 days.")
+
+
+if __name__ == "__main__":
+    main()

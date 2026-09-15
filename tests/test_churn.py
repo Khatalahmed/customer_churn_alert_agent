@@ -60,6 +60,16 @@ def test_churn_candidates_tool_returns_ranked_json(tmp_path, monkeypatch):
     assert scores == sorted(scores, reverse=True)
 
 
+def test_token_prices_come_from_env(monkeypatch):
+    from churn.utils import token_prices
+    monkeypatch.delenv("MODEL_PRICE_IN_PER_M", raising=False)
+    monkeypatch.delenv("MODEL_PRICE_OUT_PER_M", raising=False)
+    assert token_prices() is None                 # unknown, not a wrong guess
+    monkeypatch.setenv("MODEL_PRICE_IN_PER_M", "0.5")
+    monkeypatch.setenv("MODEL_PRICE_OUT_PER_M", "1.5")
+    assert token_prices() == (0.5, 1.5)
+
+
 def test_psi_stable_is_near_zero():
     x = pd.Series(np.random.RandomState(0).normal(size=500))
     assert psi(x, x) < 0.01
@@ -88,6 +98,55 @@ def test_memory_roundtrip(tmp_path, monkeypatch):
     assert memory.recently_contacted_ids() == set()
     memory.mark_contacted([1, 2, 3])
     assert memory.recently_contacted_ids() == {1, 2, 3}
+
+
+def _pred(uid, risk, evidence=None, action="coupon", prob=0.5):
+    return {"user_id": uid, "full_name": f"User {uid}", "risk_level": risk,
+            "churn_probability": prob, "suggested_action": action,
+            "reason": "test", "evidence": evidence or {}}
+
+
+def test_modules_import_without_side_effects():
+    # importing must not run the pipeline, need an API key, or need output files
+    import importlib
+    for name in ["eval", "verifier", "critic", "report",
+                 "mark_contacted", "archetype_eval", "train_model", "main"]:
+        importlib.import_module(f"churn.{name}")
+
+
+def test_eval_score():
+    from churn.eval import score
+    preds = [_pred(1, "HIGH"), _pred(2, "MEDIUM"), _pred(3, "LOW")]
+    s = score(preds, truly_churned={1, 3})
+    assert s["true_positives"] == {1}
+    assert s["false_positives"] == {2}
+    assert s["false_negatives"] == {3}
+    assert s["precision"] == 0.5 and s["recall"] == 0.5
+
+
+def test_verifier_accepts_true_facts_and_flags_wrong_ones():
+    from churn.config import connect_readonly
+    from churn.verifier import real_facts, verify
+    conn = connect_readonly()
+    uid = 10
+    good = real_facts(conn, uid)
+    bad = {**good, "total_orders": good["total_orders"] + 1}
+    result = verify(conn, [_pred(uid, "HIGH", good), _pred(uid, "HIGH", bad)])
+    conn.close()
+    assert result["total_fields"] == 10
+    assert result["matched_fields"] == 9
+    assert list(result["mismatches"]) == [uid]
+
+
+def test_report_sorts_and_groups():
+    from datetime import datetime
+    from churn.report import build_report
+    preds = [_pred(1, "MEDIUM", prob=0.3, action="coupon"),
+             _pred(2, "HIGH", prob=0.9, action="retention call")]
+    text = build_report(preds, {2: "unresolved support tickets"}, datetime(2026, 1, 1))
+    assert text.index("(#2)") < text.index("(#1)")        # highest prob first
+    assert "### Retention calls (1)" in text and "### Coupons (1)" in text
+    assert "unresolved support tickets" in text
 
 
 def test_oof_probabilities_cover_every_customer():

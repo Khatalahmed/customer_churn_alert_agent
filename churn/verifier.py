@@ -15,9 +15,8 @@ LOGIC: We query the database ourselves, on purpose, so the check does not
        to the real number, it is a mismatch (a possible hallucination).
 """
 import json
-import sqlite3
 
-DB_PATH = "qcommerce.db"
+from .config import PREDICTIONS_PATH, connect_readonly
 
 
 def real_facts(conn, user_id):
@@ -55,50 +54,66 @@ def real_facts(conn, user_id):
     }
 
 
-# --- load the agent's predictions ---
-with open("churn_predictions.json") as f:
-    predictions = json.load(f)
+def verify(conn, predictions: list[dict]) -> dict:
+    """Check every claimed evidence field against the DB.
 
-# read-only connection, same safety rule as the tools
-conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    Returns totals plus {user_id: [mismatch lines]} for users with errors.
+    """
+    total_fields = 0
+    matched_fields = 0
+    mismatches_by_user = {}
 
-total_fields = 0
-matched_fields = 0
-users_with_errors = []
+    for p in predictions:
+        uid = p["user_id"]
+        claimed = p["evidence"]
+        mismatches = []
+        for field, real_value in real_facts(conn, uid).items():
+            total_fields += 1
+            if claimed.get(field) == real_value:
+                matched_fields += 1
+            else:
+                mismatches.append(
+                    f"{field}: agent said {claimed.get(field)}, real is {real_value}"
+                )
+        if mismatches:
+            mismatches_by_user[uid] = mismatches
 
-print("=" * 70)
-print("EVIDENCE VERIFIER")
-print("=" * 70)
+    return {
+        "total_fields": total_fields,
+        "matched_fields": matched_fields,
+        "mismatches": mismatches_by_user,
+        "fidelity": matched_fields / total_fields if total_fields else 0.0,
+    }
 
-for p in predictions:
-    uid = p["user_id"]
-    claimed = p["evidence"]
-    real = real_facts(conn, uid)
 
-    mismatches = []
-    for field, real_value in real.items():
-        total_fields += 1
-        if claimed.get(field) == real_value:
-            matched_fields += 1
-        else:
-            mismatches.append(
-                f"{field}: agent said {claimed.get(field)}, real is {real_value}"
-            )
+def main():
+    # --- load the agent's predictions ---
+    with open(PREDICTIONS_PATH) as f:
+        predictions = json.load(f)
+    names = {p["user_id"]: p["full_name"] for p in predictions}
 
-    if mismatches:
-        users_with_errors.append(uid)
-        print(f"\n[MISMATCH] user {uid} ({p['full_name']}):")
-        for m in mismatches:
+    # read-only connection, same safety rule as the tools
+    conn = connect_readonly()
+    result = verify(conn, predictions)
+    conn.close()
+
+    print("=" * 70)
+    print("EVIDENCE VERIFIER")
+    print("=" * 70)
+    for uid, lines in result["mismatches"].items():
+        print(f"\n[MISMATCH] user {uid} ({names[uid]}):")
+        for m in lines:
             print(f"    - {m}")
 
-conn.close()
+    users_with_errors = list(result["mismatches"])
+    print("\n" + "-" * 70)
+    print(f"Users checked:      {len(predictions)}")
+    print(f"Users with errors:  {len(users_with_errors)}  {users_with_errors}")
+    print(f"Fields checked:     {result['total_fields']}")
+    print(f"Fields correct:     {result['matched_fields']}")
+    print(f"Evidence fidelity:  {result['fidelity']:.2%}")
+    print("=" * 70)
 
-fidelity = matched_fields / total_fields if total_fields else 0.0
 
-print("\n" + "-" * 70)
-print(f"Users checked:      {len(predictions)}")
-print(f"Users with errors:  {len(users_with_errors)}  {users_with_errors}")
-print(f"Fields checked:     {total_fields}")
-print(f"Fields correct:     {matched_fields}")
-print(f"Evidence fidelity:  {fidelity:.2%}")
-print("=" * 70)
+if __name__ == "__main__":
+    main()
