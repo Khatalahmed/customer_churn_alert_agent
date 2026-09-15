@@ -90,6 +90,15 @@ def test_memory_roundtrip(tmp_path, monkeypatch):
     assert memory.recently_contacted_ids() == {1, 2, 3}
 
 
+def test_oof_probabilities_cover_every_customer():
+    from churn.archetype_eval import oof_probabilities
+    df, cols = build_features()
+    df = add_labels(df)
+    oof = oof_probabilities(df[cols], df["churned"])
+    assert len(oof) == len(df)
+    assert ((oof > 0) & (oof < 1)).all()
+
+
 def test_pii_redaction():
     from churn.pii import redact
     dirty = "Contact Sameer at 9876543210 or sameer@example.com today"
