@@ -1,276 +1,217 @@
-﻿# Customer Churn Early-Warning Agent
+<div align="center">
 
-![CI](https://github.com/Khatalahmed/customer_churn_alert_agent/actions/workflows/ci.yml/badge.svg)
+# 🚨 Customer Churn Early-Warning Agent
 
-A hybrid **ML + multi-agent** system for a quick-commerce platform (Blinkit / Zepto style)
-that predicts which customers are about to quietly leave, investigates *why* using
-specialised sub-agents, verifies every claim against the database, and hands a retention
-team a prioritised, explainable worklist — then remembers who it already contacted.
+### An XGBoost model predicts *who* is leaving. An LLM multi-agent investigates *why* — and every claim is checked against the database.
 
-> **One line:** an XGBoost model ranks 300 customers by *risk × value*; a deep agent
-> investigates the top slice through three single-purpose sub-agents; every fact the agent
-> cites is machine-verified; the output is a business-ready report — measured honestly on
-> known ground truth.
+Built to prove a point: **measure everything, including the techniques that fail.**
+
+[![CI](https://github.com/Khatalahmed/customer_churn_alert_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Khatalahmed/customer_churn_alert_agent/actions)
+![Python](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
+![XGBoost](https://img.shields.io/badge/XGBoost-ranking-FF6600)
+![LangGraph](https://img.shields.io/badge/LangGraph-deepagents-1C3C3C)
+![SHAP](https://img.shields.io/badge/SHAP-explainable-9C27B0)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
+![LangSmith](https://img.shields.io/badge/LangSmith-traced-FF7043)
+
+<table>
+<tr>
+<td align="center"><b>0.73</b><br><sub>ROC-AUC<br><i>honest, no leakage</i></sub></td>
+<td align="center"><b>1.00</b><br><sub>precision<br><i>@ top-15</i></sub></td>
+<td align="center"><b>100%</b><br><sub>evidence<br><i>fidelity</i></sub></td>
+<td align="center"><b>~₹5</b><br><sub>cost<br><i>per scan</i></sub></td>
+</tr>
+</table>
+
+</div>
 
 ---
 
 ## The problem
 
-On quick-commerce apps, valuable customers churn **silently**. Someone who ordered a dozen
-times and left 5-star reviews simply stops — no complaint, no cancellation notice. They
-just switch to a rival app. By the time anyone notices, they are gone. But **the data
-changed before they left**: cancelled orders, unresolved tickets, falling ratings, a
-declining login trend.
+On quick-commerce apps, your best customers leave **without a word**. They ordered a dozen
+times, left 5-star reviews — then just stopped, and switched to a rival app.
 
-Detecting this early — while a coupon or a call can still win them back — is worth
-automating. This project does the detection *and* the prioritisation *and* the explanation.
+Nobody filed a complaint. **But the data changed first:** cancelled orders, unresolved
+tickets, ratings dropping, logins fading. Catch that early and a coupon still works. Catch it
+late and they're gone. This system does the catching, the ranking, and the explaining.
 
 ---
 
-## Architecture
+## The idea: a two-stage triage funnel
+
+Cheap ML scores everyone. Expensive AI investigates only the few that matter.
+
+| Stage | Engine | Cost | Covers |
+|---|---|---|---|
+| **1 · Predict** | XGBoost model | ~free | **all 300** customers |
+| **2 · Investigate** | LLM deep agent + 3 sub-agents | ~₹5/scan | **top 15** by risk × value |
+
+The agent doesn't just trust the model — it **overrules** it. When the model says "high risk"
+but the tickets and reviews are clean, the agent downgrades the flag.
 
 ```mermaid
-flowchart TD
-    A[SQLite DB<br/>300 customers, 120 days] --> B[XGBoost churn model<br/>leakage-safe features]
-    B --> C[Priority = churn prob x avg order value<br/>expected value at risk]
-    C --> D[risk-ranker sub-agent<br/>top-15 shortlist]
-    D --> E[Deep agent<br/>planning + delegation]
-    E --> F[ticket sub-agent]
-    E --> G[review sub-agent]
-    F --> H[Structured verdict<br/>+ evidence block]
-    G --> H
-    H --> V[Evidence verifier<br/>fact-check vs DB]
-    H --> R[Retention report<br/>+ SHAP reasons]
-    R --> M[Memory<br/>skip contacted 30d]
+flowchart LR
+    A[SQLite DB<br/>300 customers] --> B[XGBoost<br/>leakage-safe]
+    B --> C[rank by<br/>risk × value]
+    C --> D[Deep agent<br/>top-15]
+    D --> E[ticket + review<br/>sub-agents]
+    E --> F[verdict<br/>+ evidence]
+    F --> G[Verifier<br/>fact-check vs DB]
+    F --> H[Report + memory]
 ```
 
-**The key idea:** the ML model is cheap and scores *everyone*; the agent is expensive and
-only investigates the *top priorities*. ML predicts, the agent investigates, and **both feed
-the final decision** — the agent even *overrides* the model when the evidence is benign.
+---
+
+## What it produces
+
+One command → an evidence-backed retention worklist (real output):
+
+```text
+[HIGH  ] user 99 Sameer Joshi   prob=0.98 -> retention call
+  reason: churn prob 98%, logins dropped to 0, 3 unresolved tickets
+          (refund, payment, delivery), and a 1-star "Wrong item delivered".
+
+[MEDIUM] user 42 Nisha Verma    prob=0.58 -> coupon
+  reason: logins actually rose 0->2, no tickets — agent downgraded the model.
+```
+
+Then it **grades itself** — no guessing:
+
+```text
+Precision @ top-15 : 1.00     (every escalation was a real churner; n=15, so one miss = 0.93)
+Evidence fidelity  : 100%     (75/75 cited facts matched the database)
+Uplift method check: a hold-out test recovers the planted coupon effect (+31 pts)
+                     on average, but one test on 78 churners ranges +14 to +47 pts
+```
 
 ---
 
 ## Results
 
-Measured on a held-out test set and against planted ground truth (the simulator knows
-exactly who churned). *Numbers below are from representative runs; because the simulator
-uses a wall-clock reference, regenerating the data shifts them slightly (e.g. AUC lands in
-the 0.70–0.75 range, churner count ~68–78) — see Limitations.*
+### Per archetype: where the model works — and where it doesn't
 
-| Metric | Value | What it means |
-|---|---|---|
-| **Model ROC-AUC** | **0.731** | Honest population ranking on leakage-safe features (not a suspicious 0.99) |
-| **Precision @ top-15** | **1.00** | Every customer the agent escalated is a genuine churner |
-| **Evidence fidelity** | **100%** | Every fact the agent cited matches the database exactly |
-| **Recall** | 0.22 | 15 of 68 churners — *intentionally* capped by the investigation budget (see below) |
+The simulator plants five customer types. Two really churn; two are **traps** that only
+*look* dormant (people on holiday, and loyal buyers who order rarely).
 
-**On recall — this is a design choice, not a weakness.** It is a two-stage *triage* system:
-the model ranks the full population (AUC 0.731); the agent deeply investigates only the
-top-15 by priority, achieving 100% precision. You raise `top_n` to trade cost for coverage.
-Optimising for precision on high-value customers is deliberate — a wasted coupon is cheap,
-but a false "call this VIP" escalation erodes the team's trust in the system.
+![Per-archetype recall vs false-alarm](docs/img/archetype_recall.png)
 
-### Per-archetype performance
+Measured **out-of-fold** (5-fold CV, each customer scored by a model that never saw them;
+mean over 10 fold seeds):
 
-The simulator plants *typed* customers, so the model can be judged by **how** each customer
-churns — not just an average. Two churner types and two false-positive "traps":
+- **Gradual faders are caught more often than cliff-droppers** (61% vs 42% at a 0.5
+  threshold). Recall at a fixed threshold is modest — the pipeline relies on *ranking*
+  the top 15, not on the threshold.
+- **The traps are the weak spot.** Vacationers (42%) and loyal low-frequency buyers (36%)
+  are flagged at ~2.5× the rate of regular customers (15%). A likely cause: they have few
+  orders and reviews, so their rate features are noisy. This is exactly where the agent's
+  ticket/review check has to earn its keep.
 
-| Archetype | Churned? | n | Model flags | Meaning |
-|---|---|---|---|---|
-| cliff-dropper (sudden exit) | yes | 43 | **88%** | recall |
-| gradual-fader (slow decline) | yes | 35 | **91%** | recall |
-| vacationer (break, then returns) | no | 25 | **20%** | false-alarm |
-| loyal bulk-buyer (low frequency) | no | 26 | **15%** | false-alarm |
-| regular active | no | 171 | 5% | false-alarm |
+<sub>An earlier version of this section reported 88% / 91% recall and 15–20% trap
+false-alarms. Those were **in-sample** (the saved model had trained on most of those
+customers). `churn.archetype_eval` now prints both columns so the gap stays visible.</sub>
 
-Two findings worth the whole exercise:
-- **Sudden and gradual churners are caught equally** (88% vs 91%) — because the model judges
-  *experience quality*, not activity *timing*, so the fade shape can't fool it. The
-  leakage-safe design (no recency features) is also what makes it robust to churn shape.
-- **It resists the traps.** A naive "no orders in 14 days" rule would false-alarm on **100%**
-  of the 51 vacationers + loyal buyers (they look dormant). The model flags only **15–20%** —
-  because it asks *"did they have a bad experience?"*, not *"are they quiet?"*.
+### It uses signals that make sense
+
+![XGBoost feature importance](docs/img/feature_importance.png)
+
+Every feature is a **rate or average** (cancellation rate, unresolved-ticket rate, review
+score) — never a raw count. Raw counts leak the answer; rates capture the *cause*.
+
+<sub>*Numbers are from representative runs; the simulator uses a wall-clock reference, so
+regenerating shifts them slightly (AUC 0.70–0.75). See [Limitations](#limitations).*</sub>
 
 ---
 
-## How it works
+## The honest engineering (what makes this more than a tutorial)
 
-1. **Synthetic data with *causal* churn.** A standalone simulator builds a realistic SQLite
-   database (users, orders, audit log, tickets, reviews). Crucially, churn is **caused by
-   behaviour** — hidden drivers (delivery pain, support pain, pickiness) shape both the
-   customer's bad experiences *and* their churn probability. This gives an ML model genuine
-   signal to learn, instead of a random coin-flip.
+Every decision below was **measured, not assumed**:
 
-2. **XGBoost churn model.** Trained on **leakage-safe** features — rates and averages
-   (cancellation rate, unresolved-ticket rate, review ratings, order value), never raw
-   counts (which leak the "they stopped" label).
-
-3. **Value-weighted priority.** `priority = churn_probability × avg_order_value`
-   ("expected value at risk"), so high-value customers at risk rise to the top.
-
-4. **Deep agent + three sub-agents.** A planning supervisor delegates to single-purpose
-   sub-agents (risk-ranker, ticket-analyst, review-analyst), gathers evidence, and produces
-   a structured verdict per customer. It **moderates** the model — downgrading a
-   high-probability customer to LOW when the evidence is benign.
-
-5. **Evidence verifier.** Independently re-queries the database to fact-check every number
-   the agent cited — catching any hallucination before a human sees it.
-
-6. **SHAP explainability.** Each customer's report row shows *why* the model flagged them
-   ("high cancellation rate", "unresolved support tickets") — and this converges with the
-   agent's independent evidence.
-
-7. **Retention report + memory.** A business-ready markdown report (priority, risk %, ML
-   reason, action, evidence). A contact log ensures the next run does **not** re-flag
-   customers already contacted in the last 30 days.
-
----
-
-## Key engineering decisions
-
-These are the decisions that separate this from a tutorial project — each was *measured*,
-not assumed:
-
-- **Leakage awareness.** Recent-activity features would give a fake ~0.99 AUC (they *are*
-  the label). Used rates/averages instead → honest 0.731. A believable churn model, not a
-  suspicious one.
-
-- **SHAP-driven feature selection, by testing.** SHAP flagged two suspicious features.
-  Tested both: removing `tenure_days` held AUC (0.728 → 0.731) so it was overfit noise —
-  **dropped it**; removing `avg_order_value` dropped AUC to 0.656 so it carried real signal —
-  **kept it**. Conclusions earned by measurement.
-
-- **Confound awareness.** Raw ticket *count* was reversed (churned users had fewer, because
-  they left earlier and had less activity). Used **rates**, not counts, to avoid the volume
-  confound.
-
-- **The critic agent that honestly *hurt*.** Added a skeptical 4th reviewer for multi-agent
-  debate — and measured it. On the already-precise top-15 it *reduced recall* by downgrading
-  two genuine churners with reasonable-sounding rules ("no complaints = fine"), because churn
-  here is also delivery-driven. **Lesson: a critic only pays off on a candidate set that
-  actually contains false positives.** Measured, not assumed.
-
-- **Provider as config, not code.** A single `get_model()` factory switches between Vertex AI
-  (Gemini), Groq (Llama), and the Gemini Developer API by editing one env var. (Also surfaced
-  a real finding: Groq's Llama-70B emitted malformed tool calls that broke the agent harness,
-  while Gemini handled them — a genuine model/harness compatibility lesson.)
-
-- **Safety by data minimisation, plus defense-in-depth.** The agent's tools use a
-  **read-only** database connection and only return the fields needed for a decision — so
-  customer phone/email never reach the LLM in the first place. On top of that, a
-  **PII-redaction middleware** scrubs emails/phone numbers from every tool result before the
-  model sees it (a safety net; production would use Presidio's NER for names/addresses).
-
-- **Operations.** The whole system **containerises** (a `Dockerfile` bakes in the data +
-  trained model, runs with `docker run`), is **traced** end-to-end in **LangSmith** (every
-  LLM/sub-agent/tool call, latency + tokens, via one env var), reports **cost per run**
-  (~₹5/scan), and is guarded by a **pytest** suite in **GitHub Actions CI**.
+| Decision | Why — with the evidence |
+|---|---|
+| 🚫 **No recency features** | They'd fake a ~0.99 AUC (they *are* the label). Rates give an honest **0.73** instead. |
+| 🔬 **SHAP-tested features** | Dropped `tenure_days` (removing it held AUC → overfit noise); kept `avg_order_value` (removing it dropped AUC 0.73→0.66 → real signal). |
+| ⚖️ **Rates, not counts** | Raw ticket count was *reversed* — churned users left early, so had *fewer* events. Rates kill the confound. |
+| ❌ **A critic agent I removed** | Added a skeptical reviewer, **measured it, and it hurt** — it downgraded real churners on an already-clean shortlist. Kept as a documented negative result. |
+| 🔁 **Provider = config** | One factory swaps Vertex AI / Groq / Gemini via an env var. (Found Groq's Llama-70B emits tool calls the harness rejects; Gemini doesn't.) |
+| 🔒 **Least-privilege + PII** | Read-only DB; tools never return phone/email; a redaction middleware scrubs any leak before the LLM. |
+| 🎯 **Uplift as a method check** | The coupon effect is *simulated*, so its size is known by construction — reporting it as a result would be circular. Instead `uplift.py` checks that a hold-out test **recovers** the planted effect, and shows how noisy one test is (±17 pts at n=78). |
+| 🛠 **Production-ready** | Dockerised · LangSmith-traced · cost-tracked (~₹5/scan) · pytest + GitHub Actions CI. |
 
 ---
 
 ## Considered and rejected
 
-Knowing what *not* to build is part of the design. Each of these is real technology — just
-not the right fit for *this* problem:
+Knowing what *not* to build is half the design:
 
 | Rejected | Why |
 |---|---|
-| **RAG** | Data is structured — retrieval is SQL (exact, free). No document corpus to embed. |
-| **Knowledge graph** | Relationships are one foreign-key hop deep; SQL answers everything. |
-| **A2A protocol** | All agents live in one system; A2A is for cross-organisation agent interop. |
-| **Kubernetes** | A weekly batch job over one SQLite file. A container + a schedule is right-sized. |
-| **Fine-tuning** | No data volume and no measured prompting failure. Order is prompt → tools → fine-tune. |
-| **Fancy UI** | The product is decision quality — the metrics and the report, not a dashboard. |
-
----
-
-## Tech stack
-
-- **Python 3.14** + [`uv`](https://github.com/astral-sh/uv) (project/package manager)
-- **Agent harness:** `deepagents` (LangChain / LangGraph) — planning, sub-agents, structured output
-- **LLM:** Gemini via Vertex AI (swappable to Groq / Gemini API via one env var)
-- **ML:** XGBoost, scikit-learn, SHAP, pandas
-- **Data:** SQLite (standard-library simulator, zero external services)
+| **RAG** | Structured data → retrieval is SQL. No corpus to embed. |
+| **Knowledge graph** | Relationships are one FK hop; SQL answers everything. |
+| **Kubernetes** | A weekly batch job on one SQLite file — a container is right-sized. |
+| **Fine-tuning** | No data volume, no measured prompting failure. |
+| **Fancy UI / live dashboard** | The product is decision quality — the metrics and the report. |
 
 ---
 
 ## Project structure
 
-```
-customer_churn_alert_agent/
-├── churn/                     # the source package
-│   ├── utils.py               # get_model() - provider-swappable LLM factory
-│   ├── quick_commerce_sim.py  # synthetic data simulator (causal churn) + answer key
-│   ├── features.py            # leakage-safe feature table from the DB
-│   ├── train_model.py         # trains + evaluates XGBoost, saves churn_model.pkl
-│   ├── explain.py             # SHAP explainability (global + per-customer top factor)
-│   ├── scoring.py             # get_churn_candidates tool - value-weighted priority
-│   ├── tools.py               # deterministic read-only SQL tools
-│   ├── prompts.py, schemas.py # sub-agent/supervisor prompts; Pydantic output schema
-│   ├── main.py                # the deep agent: risk-ranker + ticket + review sub-agents
-│   ├── eval.py                # precision / recall vs planted ground truth
-│   ├── verifier.py            # fact-checks the agent's evidence against the DB
-│   ├── critic.py              # skeptical reviewer (multi-agent debate), self-measured
-│   ├── archetype_eval.py      # per-archetype recall + false-alarm on trap types
-│   ├── drift.py               # PSI data-drift detection
-│   ├── uplift.py              # retention uplift measurement (hold-out A/B)
-│   ├── pii.py                 # PII-redaction middleware (defense-in-depth)
-│   ├── report.py              # business-ready retention report (markdown)
-│   └── memory.py, mark_contacted.py  # contact log - no re-nagging across runs
-├── tests/test_churn.py        # pytest suite (deterministic, no LLM)
-├── scripts/                   # standalone exploration (explore_db, check_causality)
-├── docs/                      # PROJECT_GUIDE + sample report
-├── Dockerfile, .github/       # container + CI
-└── pyproject.toml, uv.lock    # dependencies
+```text
+churn/                     # source package
+├── quick_commerce_sim.py  #   synthetic data (causal churn + archetypes) + answer key
+├── features.py            #   leakage-safe feature table
+├── train_model.py         #   XGBoost + honest eval
+├── scoring.py             #   risk × value priority tool
+├── main.py                #   the deep agent (3 sub-agents)
+├── eval.py / verifier.py  #   precision-recall + evidence fact-checking
+├── explain.py             #   SHAP
+├── archetype_eval.py      #   per-type recall + trap false-alarms
+├── critic.py              #   the measured negative result
+├── uplift.py / drift.py   #   hold-out uplift + PSI drift
+├── pii.py / memory.py     #   redaction middleware + no re-nagging
+tests/  ·  docs/  ·  scripts/  ·  Dockerfile  ·  .github/
 ```
 
-Generated artifacts (`qcommerce.db`, `churn_model.pkl`, the JSON outputs) are written to
-the repo root at runtime and are git-ignored.
+📖 **New here?** Read [`docs/PROJECT_GUIDE.md`](docs/PROJECT_GUIDE.md) (the plan) then
+[`docs/BUILD_JOURNEY.md`](docs/BUILD_JOURNEY.md) (built stage by stage).
 
 ---
 
 ## Running it
 
 ```bash
-# 1. install dependencies
-uv sync
+uv sync                                        # install
+# add a .env, e.g.  MODEL_PROVIDER=groq  MODEL_NAME=llama-3.3-70b-versatile  GROQ_API_KEY=...
+# optional: MODEL_PRICE_IN_PER_M / MODEL_PRICE_OUT_PER_M (USD per 1M tokens) for the run-cost estimate
+# optional: CHURN_DATA_DIR=... to keep the DB, model and outputs outside the repo
 
-# 2. create a .env with your model provider (Vertex / Groq / Gemini API)
-#    e.g. MODEL_PROVIDER=groq  MODEL_NAME=llama-3.3-70b-versatile  GROQ_API_KEY=...
+uv run python -m churn.quick_commerce_sim init # 1. build data + answer key
+uv run python -m churn.train_model             # 2. train the model
+uv run python -m churn.main                    # 3. run the agent
 
-# 3. build the synthetic database + answer key
-uv run python -m churn.quick_commerce_sim init
+uv run python -m churn.eval                    # precision / recall
+uv run python -m churn.verifier                # evidence fidelity
+uv run python -m churn.archetype_eval          # per-archetype performance
+uv run python -m churn.report                  # retention worklist
+```
 
-# 4. train the churn model
-uv run python -m churn.train_model
+Or with Docker (data + model baked in, no API key for the ML demo):
 
-# 5. run the agent (ML ranks -> agent investigates -> structured verdicts)
-uv run python -m churn.main
-
-# 6. measure it
-uv run python -m churn.eval         # precision / recall vs ground truth
-uv run python -m churn.verifier     # evidence fidelity
-
-# 7. produce the business artifacts
-uv run python -m churn.report       # retention_report.md (with SHAP reasons)
-uv run python -m churn.explain      # SHAP explanations
+```bash
+docker build -t churn-agent . && docker run --rm churn-agent uv run python -m churn.explain
 ```
 
 ---
 
-## Limitations & honest notes
+## Limitations
 
-- **Synthetic data.** There are no real users; results are framed as engineering + eval
-  quality, not business impact. The simulator's churn is *designed* to be behaviour-driven,
-  so the model's signal is as good as that design.
-- **Reproducibility.** The simulator uses wall-clock "now", so activity counts shift day to
-  day (the churn *labels* are seed-fixed). A stable reference timestamp is a known future
-  refinement.
-- **Not production-scale.** Per-customer LLM investigation suits a top-N triage, not millions
-  of customers — the ML layer exists precisely to keep the agent's workload bounded.
+- **Synthetic data** — no real users. Results are framed as engineering + eval quality, never business impact.
+- **Reproducibility** — wall-clock "now" shifts counts day to day (labels are seed-fixed). A frozen timestamp is a known fix.
+- **Not million-scale** — per-customer LLM investigation suits top-N triage; the ML layer keeps the agent's workload bounded.
 
 ---
 
-*Built as a hands-on study of the ML + agent hybrid pattern: prediction, tool-using agents,
-structured output, evaluation against ground truth, explainability, and the honest
-measurement of every technique — including the ones that did not help.*
+<div align="center">
+<sub>A hands-on study of the ML + agent hybrid pattern — prediction, tool-using agents, structured output,<br>
+evaluation against ground truth, explainability, and the honest measurement of <b>every</b> technique.</sub>
+</div>
