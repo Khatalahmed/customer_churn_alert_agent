@@ -9,18 +9,17 @@ WHY  : We use QUALITY / RATE features, not raw counts (counts leak the label).
        nothing" or "rated zero". XGBoost handles NaN natively.
 FLOW : query per-customer aggregates from each table -> merge them -> fill
        count columns with 0 but leave the averages as NaN -> build rate
-       features -> attach the churn label from the answer key.
+       features. add_labels() attaches the churn label from the answer key
+       separately, so scoring works without it.
 LOGIC: rates measure the QUALITY of a customer's experience (the real cause
        of churn). We dropped tenure_days: it had no real group difference but
        the model was overfitting to noise in it (SHAP revealed this).
 """
 import json
-import sqlite3
 
 import pandas as pd
 
-DB_PATH = "qcommerce.db"
-TRUTH_PATH = "churn_truth.json"
+from .config import DB_PATH, TRUTH_PATH, connect_readonly
 
 # Final features the model trains on. tenure_days removed (overfit noise).
 
@@ -34,9 +33,9 @@ FEATURE_COLS = [
 ]
 
 
-def build_features(db_path: str = DB_PATH, truth_path: str = TRUTH_PATH):
-    """Return (dataframe, feature_columns). One row per customer."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+def build_features(db_path=None):
+    """Return (dataframe, feature_columns). One row per customer, no label."""
+    conn = connect_readonly(db_path or DB_PATH)
 
     customers = pd.read_sql(
         "SELECT user_id FROM users WHERE user_type='CUSTOMER'", conn
@@ -86,17 +85,22 @@ def build_features(db_path: str = DB_PATH, truth_path: str = TRUTH_PATH):
     df["tickets_per_order"]      = df["total_tickets"] / df["total_orders"].replace(0, 1)
     df["pct_low_reviews"]        = df["low_reviews"]  / df["total_reviews"].replace(0, 1)
 
-    # attach the churn label from the answer key
-    with open(truth_path) as f:
+    return df, FEATURE_COLS
+
+
+def add_labels(df: pd.DataFrame, truth_path=None) -> pd.DataFrame:
+    """Attach the churn label from the answer key. Training / eval only -
+    scoring must never need this file (in production there is no answer key)."""
+    with open(truth_path or TRUTH_PATH) as f:
         truth = json.load(f)
     churn_map = {r["user_id"]: int(r["churned"]) for r in truth}
     df["churned"] = df["user_id"].map(churn_map).fillna(0).astype(int)
-
-    return df, FEATURE_COLS
+    return df
 
 
 if __name__ == "__main__":
     df, cols = build_features()
+    df = add_labels(df)
     print("Feature columns:", cols)
     print(f"Rows: {len(df)}   churned: {df['churned'].sum()}")
     print("\nMean feature value by group (0 = active, 1 = churned):")

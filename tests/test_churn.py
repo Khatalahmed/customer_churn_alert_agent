@@ -13,7 +13,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from churn.features import build_features, FEATURE_COLS
+from churn.features import add_labels, build_features, FEATURE_COLS
 from churn.config import MODEL_PATH
 from churn.tools import get_inactive_users
 from churn.drift import psi
@@ -23,8 +23,23 @@ def test_features_shape():
     df, cols = build_features()
     assert cols == FEATURE_COLS
     assert len(df) == 300
-    assert "churned" in df.columns
+    assert "churned" not in df.columns          # scoring must not need the answer key
+    df = add_labels(df)
     assert df["churned"].isin([0, 1]).all()
+
+
+def test_scoring_works_without_answer_key_from_any_directory(tmp_path, monkeypatch):
+    import pytest
+    import churn.features as features
+    from churn.scoring import score_customers
+    # hide the answer key, and run from an unrelated directory
+    monkeypatch.setattr(features, "TRUTH_PATH", tmp_path / "missing.json")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(FileNotFoundError):       # proves the answer key is really hidden
+        add_labels(build_features()[0])
+    df = score_customers()
+    assert len(df) == 300
+    assert df["churn_probability"].between(0, 1).all()
 
 
 def test_tool_returns_valid_json():
