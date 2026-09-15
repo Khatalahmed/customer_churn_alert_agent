@@ -26,21 +26,6 @@ user_id, name, churn probability, average order value, priority score, login
 trend, and total orders. Do NOT change the order.
 """
 
-# --- Sub-agent 1: activity / login trend ---
-INACTIVITY_PROMPT = """
-You are a customer activity analyst. Your job is to find customers who
-have stopped using the app.
-
-Use the get_inactive_users tool to get the list of inactive customers.
-For each customer, look at the login trend. Compare logins_prev_30_60d
-(the earlier period) with logins_recent_30d (the recent period). A large
-fall means the customer is going quiet.
-
-Report the list of inactive customers. For each one, give the user_id,
-the name, the last order date, and the login trend. Keep it short and
-clear.
-"""
-
 # --- Sub-agent 2: support tickets ---
 TICKET_PROMPT = """
 You are a support ticket analyst. You are given a user_id.
@@ -49,7 +34,11 @@ Use the get_user_tickets tool to get that customer's tickets. Look only
 for NEGATIVE signals, such as complaints, unresolved problems, refunds,
 delivery delays, or payment issues.
 
-Decide if the customer looks UNHAPPY or FINE. Give the evidence for your
+Start your answer with this line, copying the numbers EXACTLY from the tool
+output (do not count the tickets yourself):
+total_tickets: <total_tickets>, unresolved_tickets: <unresolved_tickets>
+
+Then decide if the customer looks UNHAPPY or FINE. Give the evidence for your
 decision, such as the ticket subject and its status. If the customer has
 no tickets, say there are no ticket signals.
 """
@@ -62,7 +51,11 @@ Use the get_user_reviews tool to get that customer's reviews. Look for low
 ratings (1 or 2 stars) or negative words in the text. Also note if the
 customer has NO reviews at all, because silence is a weak signal too.
 
-Decide if the customer looks UNHAPPY, FINE, or SILENT (no reviews). Give
+Start your answer with this line, copying the numbers EXACTLY from the tool
+output (do not scan the ratings yourself):
+total_reviews: <total_reviews>, worst_review_rating: <worst_review_rating>
+
+Then decide if the customer looks UNHAPPY, FINE, or SILENT (no reviews). Give
 the evidence, such as the rating and the review text.
 """
 
@@ -90,10 +83,10 @@ Follow these steps:
 
 IMPORTANT rules:
 - Copy churn_probability from the risk-ranker output. Do not change it.
-- Fill the evidence block with the EXACT numbers:
+- Fill the evidence block by COPYING numbers, never by counting:
   logins_prev_30_60d, logins_recent_30d, total_orders from risk-ranker;
-  total_tickets = how many tickets ticket-analyst found;
-  worst_review_rating = the lowest star rating review-analyst found, or 0 if
-  the customer has no reviews.
+  total_tickets from the "total_tickets:" line of ticket-analyst;
+  worst_review_rating from the "worst_review_rating:" line of review-analyst
+  (it is already 0 when the customer has no reviews).
 - The numbers must be true, because they are checked against the database.
 """

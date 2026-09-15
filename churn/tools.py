@@ -19,85 +19,24 @@ import sqlite3
 
 from langchain.tools import tool
 
-DB_PATH = "qcommerce.db"
+from .config import connect_readonly
 
 
 def _connect_readonly() -> sqlite3.Connection:
     """Open the database in read-only mode. The tools can read but never write."""
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn = connect_readonly()
     conn.row_factory = sqlite3.Row  # now we can use row["full_name"] like a dict
     return conn
-
-
-@tool
-def get_inactive_users(days: int = 14, top_n: int = 10) -> str:
-    """Find the customers who are most inactive.
-
-    This returns customers who have not placed an order in the last `days`
-    days. They are sorted so the quietest customer comes first, and we only
-    return `top_n` of them. For each customer we also show their login
-    pattern: how many times they logged in before (30 to 60 days ago)
-    compared to now (last 30 days). A big drop is the main churn signal.
-
-    Args:
-        days: how many days with no order counts as "inactive" (default 14).
-        top_n: the most customers to return (default 10).
-    """
-    conn = _connect_readonly()
-    cur = conn.cursor()
-    rows = cur.execute(
-        """
-        SELECT u.user_id, u.full_name, u.city,
-               MAX(o.placed_at) AS last_order,
-               COUNT(o.order_id) AS total_orders
-        FROM users u
-        LEFT JOIN orders o ON o.user_id = u.user_id
-        WHERE u.user_type = 'CUSTOMER'
-        GROUP BY u.user_id
-        HAVING last_order IS NULL
-            OR last_order < datetime('now', ?)
-        ORDER BY last_order
-        LIMIT ?
-        """,
-        (f"-{days} days", top_n),
-    ).fetchall()
-
-    results = []
-    for r in rows:
-        uid = r["user_id"]
-        prev = cur.execute(
-            """SELECT COUNT(*) FROM auth_audit_log
-               WHERE user_id = ? AND event_type = 'LOGIN'
-                 AND event_timestamp BETWEEN datetime('now','-60 days')
-                                         AND datetime('now','-30 days')""",
-            (uid,),
-        ).fetchone()[0]
-        recent = cur.execute(
-            """SELECT COUNT(*) FROM auth_audit_log
-               WHERE user_id = ? AND event_type = 'LOGIN'
-                 AND event_timestamp >= datetime('now','-30 days')""",
-            (uid,),
-        ).fetchone()[0]
-        results.append({
-            "user_id": uid,
-            "full_name": r["full_name"],
-            "city": r["city"],
-            "last_order": r["last_order"],
-            "total_orders": r["total_orders"],
-            "logins_prev_30_60d": prev,
-            "logins_recent_30d": recent,
-        })
-    conn.close()
-    return json.dumps(results, indent=2)
 
 
 @tool
 def get_user_tickets(user_id: int) -> str:
     """Get all the support tickets from one customer.
 
-    This returns each ticket with its type, priority, status, subject,
-    description, and resolution notes. It helps us find bad signs, like a
-    refund that was never given or a delivery problem that was never fixed.
+    This returns a summary (total_tickets, unresolved_tickets) plus each
+    ticket with its type, priority, status, subject, description, and
+    resolution notes. It helps us find bad signs, like a refund that was
+    never given or a delivery problem that was never fixed.
 
     Args:
         user_id: the id of the customer.
@@ -113,17 +52,25 @@ def get_user_tickets(user_id: int) -> str:
     ).fetchall()
     conn.close()
     tickets = [dict(r) for r in rows]
-    return json.dumps(tickets, indent=2)
+    # counted here, in code, so the LLM copies the number instead of counting
+    unresolved = sum(1 for t in tickets
+                     if t["status"] in ("OPEN", "IN_PROGRESS", "WAITING_ON_CUSTOMER"))
+    return json.dumps({
+        "total_tickets": len(tickets),
+        "unresolved_tickets": unresolved,
+        "tickets": tickets,
+    }, indent=2)
 
 
 @tool
 def get_user_reviews(user_id: int) -> str:
     """Get all the product reviews from one customer.
 
-    This returns each review with its rating (1 to 5), title, and text. It
-    helps us see if the customer is unhappy (low ratings or bad words). If
-    the result is empty, that is also a sign - the customer ordered but
-    never left a review.
+    This returns a summary (total_reviews, worst_review_rating) plus each
+    review with its rating (1 to 5), title, and text. It helps us see if the
+    customer is unhappy (low ratings or bad words). If there are no reviews,
+    worst_review_rating is 0 - silence is also a sign: the customer ordered
+    but never left a review.
 
     Args:
         user_id: the id of the customer.
@@ -138,4 +85,9 @@ def get_user_reviews(user_id: int) -> str:
     ).fetchall()
     conn.close()
     reviews = [dict(r) for r in rows]
-    return json.dumps(reviews, indent=2)
+    # computed here, in code, so the LLM copies the number instead of scanning
+    return json.dumps({
+        "total_reviews": len(reviews),
+        "worst_review_rating": min((r["rating"] for r in reviews), default=0),
+        "reviews": reviews,
+    }, indent=2)

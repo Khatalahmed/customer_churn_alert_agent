@@ -15,7 +15,6 @@ import pandas as pd
 
 from churn.features import add_labels, build_features, FEATURE_COLS
 from churn.config import MODEL_PATH
-from churn.tools import get_inactive_users
 from churn.drift import psi
 
 
@@ -40,13 +39,6 @@ def test_scoring_works_without_answer_key_from_any_directory(tmp_path, monkeypat
     df = score_customers()
     assert len(df) == 300
     assert df["churn_probability"].between(0, 1).all()
-
-
-def test_tool_returns_valid_json():
-    out = get_inactive_users.invoke({"days": 14, "top_n": 5})
-    data = json.loads(out)
-    assert isinstance(data, list)
-    assert len(data) <= 5
 
 
 def test_churn_candidates_tool_returns_ranked_json(tmp_path, monkeypatch):
@@ -99,7 +91,6 @@ def test_memory_roundtrip(tmp_path, monkeypatch):
     memory.mark_contacted([1, 2, 3])
     assert memory.recently_contacted_ids() == {1, 2, 3}
 
-
 def _pred(uid, risk, evidence=None, action="coupon", prob=0.5):
     return {"user_id": uid, "full_name": f"User {uid}", "risk_level": risk,
             "churn_probability": prob, "suggested_action": action,
@@ -112,6 +103,27 @@ def test_modules_import_without_side_effects():
     for name in ["eval", "verifier", "critic", "report", "uplift",
                  "mark_contacted", "archetype_eval", "train_model", "main"]:
         importlib.import_module(f"churn.{name}")
+
+
+def test_tool_summaries_match_verifier_facts():
+    # the numbers the agent copies into its evidence must equal what the
+    # verifier independently computes - for users with and without reviews
+    from churn.config import connect_readonly
+    from churn.tools import get_user_reviews, get_user_tickets
+    from churn.verifier import real_facts
+    conn = connect_readonly()
+    no_reviews = conn.execute(
+        """SELECT user_id FROM users WHERE user_type='CUSTOMER'
+           AND user_id NOT IN (SELECT user_id FROM reviews) LIMIT 1"""
+    ).fetchone()
+    user_ids = [10, 99] + ([no_reviews[0]] if no_reviews else [])
+    for uid in user_ids:
+        facts = real_facts(conn, uid)
+        tickets = json.loads(get_user_tickets.invoke({"user_id": uid}))
+        reviews = json.loads(get_user_reviews.invoke({"user_id": uid}))
+        assert tickets["total_tickets"] == facts["total_tickets"] == len(tickets["tickets"])
+        assert reviews["worst_review_rating"] == facts["worst_review_rating"]
+    conn.close()
 
 
 def test_eval_score():
