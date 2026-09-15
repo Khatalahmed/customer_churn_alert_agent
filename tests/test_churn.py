@@ -77,6 +77,7 @@ def test_azure_provider_is_keyless_and_configured_from_env(monkeypatch):
     assert type(model) is ChatOpenAI
     assert model.openai_api_base == "https://example.openai.azure.com/openai/v1/"
     assert model.model_name == "test-deployment"
+    assert model.use_responses_api is True       # tools + reasoning need /responses
 
     # a dated API version uses the classic Azure client, still keyless
     monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2024-10-21")

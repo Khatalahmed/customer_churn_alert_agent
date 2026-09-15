@@ -68,12 +68,15 @@ def get_model() -> BaseChatModel:
         # no temperature: newer (reasoning) deployments reject anything but the default
         if api_version == "v1":
             # v1 API: OpenAI-compatible URL (/openai/v1/), no dated api-version,
-            # and the deployment name is passed as the model
+            # and the deployment name is passed as the model. The Responses API
+            # is required because reasoning deployments reject function tools
+            # on /chat/completions - and the agent is built on tool calls.
             from langchain_openai import ChatOpenAI
             return ChatOpenAI(
                 base_url=endpoint.rstrip("/") + "/openai/v1/",
                 api_key=token_provider,
                 model=deployment,
+                use_responses_api=True,
             )
         # older dated API versions, e.g. 2024-10-21
         from langchain_openai import AzureChatOpenAI
