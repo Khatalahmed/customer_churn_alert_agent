@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from churn.features import build_features, FEATURE_COLS
+from churn.config import MODEL_PATH
 from churn.tools import get_inactive_users
 from churn.drift import psi
 
@@ -33,6 +34,17 @@ def test_tool_returns_valid_json():
     assert len(data) <= 5
 
 
+def test_churn_candidates_tool_returns_ranked_json(tmp_path, monkeypatch):
+    import churn.memory as memory
+    from churn.scoring import get_churn_candidates
+    # empty contact log, so no customer is skipped
+    monkeypatch.setattr(memory, "STORE_PATH", tmp_path / "contacted.json")
+    data = json.loads(get_churn_candidates.invoke({"top_n": 5}))
+    assert len(data) == 5
+    scores = [c["priority_score"] for c in data]
+    assert scores == sorted(scores, reverse=True)
+
+
 def test_psi_stable_is_near_zero():
     x = pd.Series(np.random.RandomState(0).normal(size=500))
     assert psi(x, x) < 0.01
@@ -47,7 +59,7 @@ def test_psi_detects_a_shift():
 
 def test_model_predicts_probabilities():
     import joblib
-    bundle = joblib.load("churn_model.pkl")
+    bundle = joblib.load(MODEL_PATH)
     model, cols = bundle["model"], bundle["features"]
     df, _ = build_features()
     proba = model.predict_proba(df[cols])[:, 1]
@@ -61,6 +73,7 @@ def test_memory_roundtrip(tmp_path, monkeypatch):
     assert memory.recently_contacted_ids() == set()
     memory.mark_contacted([1, 2, 3])
     assert memory.recently_contacted_ids() == {1, 2, 3}
+
 
 def test_pii_redaction():
     from churn.pii import redact

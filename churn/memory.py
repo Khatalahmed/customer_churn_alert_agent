@@ -13,7 +13,9 @@ import json
 import os
 from datetime import datetime, timedelta
 
-STORE_PATH = "contacted.json"
+from .config import CONTACTED_PATH
+
+STORE_PATH = CONTACTED_PATH
 
 
 def load_contacted() -> dict:

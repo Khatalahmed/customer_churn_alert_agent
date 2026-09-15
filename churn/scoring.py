@@ -13,21 +13,19 @@ FLOW : build features -> model predicts churn probability -> priority =
        -> return the top N with their key numbers.
 """
 import json
-import sqlite3
 
 import joblib
 import pandas as pd
 from langchain.tools import tool
 
 from .features import build_features
+from .config import MODEL_PATH, connect_readonly
 from .memory import recently_contacted_ids
-
-DB_PATH = "qcommerce.db"
 
 
 def _login_trend(user_id: int):
     """Return (logins 30-60 days ago, logins in the last 30 days) for one user."""
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn = connect_readonly()
     cur = conn.cursor()
     prev = cur.execute(
         """SELECT COUNT(*) FROM auth_audit_log
@@ -48,7 +46,7 @@ def _login_trend(user_id: int):
 
 def score_customers() -> pd.DataFrame:
     """Score all customers and return them ranked by churn priority (highest first)."""
-    bundle = joblib.load("churn_model.pkl")
+    bundle = joblib.load(MODEL_PATH)
     model, cols = bundle["model"], bundle["features"]
 
     df, _ = build_features()
@@ -57,7 +55,7 @@ def score_customers() -> pd.DataFrame:
     df["priority_score"] = df["churn_probability"] * df["avg_order_value"]
 
     # attach names for readability
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn = connect_readonly()
     names = pd.read_sql(
         "SELECT user_id, full_name FROM users WHERE user_type='CUSTOMER'", conn
     )

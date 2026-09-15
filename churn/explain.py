@@ -18,6 +18,7 @@ import joblib
 import numpy as np
 import shap
 
+from .config import MODEL_PATH
 from .features import build_features
 
 # plain-English name for each feature, for the report
@@ -33,7 +34,7 @@ FRIENDLY = {
 
 def _load_and_explain():
     """Load the model and compute SHAP values for every customer."""
-    bundle = joblib.load("churn_model.pkl")
+    bundle = joblib.load(MODEL_PATH)
     model, cols = bundle["model"], bundle["features"]
     df, _ = build_features()
     X = df[cols]
