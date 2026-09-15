@@ -15,18 +15,20 @@ LOGIC: uplift = return_rate(treatment) - return_rate(control). Only the
        "persuadable" customers create uplift. A coupon to a lost cause or a
        sure-thing is wasted money. Winnability is higher for customers who
        left over FIXABLE issues (support/delivery) than the just-unhappy.
-NOTE : in production you target the MODEL's flagged customers; here we
-       simulate on the known churners to demonstrate the measurement method.
+NOTE : this is a METHOD CHECK, not evidence that coupons work. The coupon
+       effect is planted by winnability() below, so the "true" uplift is
+       known by construction. What we measure is whether a hold-out test
+       recovers that planted effect, and how noisy a single test is. In
+       production you would target the MODEL's flagged customers and the
+       effect would be unknown - that is when the hold-out matters.
 """
 import json
 import random
+import statistics
 
-random.seed(7)
+from .config import TRUTH_PATH
 
-with open("churn_truth.json") as f:
-    truth = json.load(f)
-
-churned = [r for r in truth if r["churned"]]
+BASE_RETURN = 0.08   # chance a churned customer drifts back on their own
 
 
 def winnability(r) -> float:
@@ -41,36 +43,77 @@ def winnability(r) -> float:
     return max(0.0, min(0.6, lift))
 
 
-BASE_RETURN = 0.08   # chance a churned customer drifts back on their own
-
-# split the churned customers into treatment (coupon) and control (hold-out)
-random.shuffle(churned)
-cut = int(len(churned) * 0.7)
-treatment, control = churned[:cut], churned[cut:]
-
-
-def simulate(group, give_coupon: bool) -> int:
+def simulate(group, give_coupon: bool, rng: random.Random) -> int:
     """Simulate how many customers in the group return."""
     returned = 0
     for r in group:
         prob = BASE_RETURN + (winnability(r) if give_coupon else 0.0)
-        if random.random() < prob:
+        if rng.random() < prob:
             returned += 1
     return returned
 
 
-t_ret = simulate(treatment, give_coupon=True)
-c_ret = simulate(control, give_coupon=False)
-t_rate = t_ret / len(treatment)
-c_rate = c_ret / len(control)
-uplift = t_rate - c_rate
+def run_uplift(truth: list[dict], seed: int = 7) -> dict:
+    """Split the churned customers 70/30 and simulate treatment vs control."""
+    rng = random.Random(seed)
+    churned = [r for r in truth if r["churned"]]
 
-print("=" * 62)
-print("RETENTION UPLIFT  (coupon treatment vs hold-out control)")
-print("=" * 62)
-print(f"Treatment (coupon):    {t_ret:>2}/{len(treatment)} returned = {t_rate:5.0%}")
-print(f"Control   (hold-out):  {c_ret:>2}/{len(control)} returned = {c_rate:5.0%}")
-print("-" * 62)
-print(f"UPLIFT = {uplift:+.0%}   (extra returns CAUSED by the coupon)")
-print(f"Without a hold-out you'd have wrongly claimed {t_rate:.0%} success.")
-print("=" * 62)
+    # split the churned customers into treatment (coupon) and control (hold-out)
+    rng.shuffle(churned)
+    cut = int(len(churned) * 0.7)
+    treatment, control = churned[:cut], churned[cut:]
+
+    t_ret = simulate(treatment, give_coupon=True, rng=rng)
+    c_ret = simulate(control, give_coupon=False, rng=rng)
+    t_rate = t_ret / len(treatment)
+    c_rate = c_ret / len(control)
+    return {
+        "t_ret": t_ret, "t_n": len(treatment), "t_rate": t_rate,
+        "c_ret": c_ret, "c_n": len(control), "c_rate": c_rate,
+        "uplift": t_rate - c_rate,
+    }
+
+
+def planted_effect(truth: list[dict]) -> float:
+    """The true average uplift, known because we planted it (mean winnability)."""
+    return statistics.mean(winnability(r) for r in truth if r["churned"])
+
+
+def uplift_spread(truth: list[dict], n_runs: int = 1000) -> dict:
+    """Repeat the test with different random splits: how much does one test vary?"""
+    estimates = sorted(run_uplift(truth, seed=s)["uplift"] for s in range(n_runs))
+    return {
+        "mean": statistics.mean(estimates),
+        "low": estimates[int(n_runs * 0.025)],     # 95% of single tests land
+        "high": estimates[int(n_runs * 0.975)],    # between low and high
+    }
+
+
+def main():
+    with open(TRUTH_PATH) as f:
+        truth = json.load(f)
+    u = run_uplift(truth)
+    true_effect = planted_effect(truth)
+    spread = uplift_spread(truth)
+
+    print("=" * 66)
+    print("RETENTION UPLIFT - METHOD CHECK  (coupon vs hold-out, simulated)")
+    print("=" * 66)
+    print("One test:")
+    print(f"  Treatment (coupon):    {u['t_ret']:>2}/{u['t_n']} returned = {u['t_rate']:5.0%}")
+    print(f"  Control   (hold-out):  {u['c_ret']:>2}/{u['c_n']} returned = {u['c_rate']:5.0%}")
+    print(f"  Estimated uplift:      {u['uplift']:+.0%}")
+    print(f"  (without a hold-out you'd have claimed {u['t_rate']:.0%} success)")
+    print("-" * 66)
+    print("Does the method work?")
+    print(f"  Planted true effect:   {true_effect:+.0%}   (set by winnability(), known)")
+    print(f"  Mean over 1000 tests:  {spread['mean']:+.0%}   (unbiased if close to planted)")
+    print(f"  95% of single tests:   {spread['low']:+.0%} to {spread['high']:+.0%}   "
+          f"(n={u['t_n'] + u['c_n']} is small)")
+    print("=" * 66)
+    print("NOTE: the coupon effect is simulated. This validates the hold-out")
+    print("      measurement, not whether real coupons win customers back.")
+
+
+if __name__ == "__main__":
+    main()

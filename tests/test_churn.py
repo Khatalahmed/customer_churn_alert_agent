@@ -109,7 +109,7 @@ def _pred(uid, risk, evidence=None, action="coupon", prob=0.5):
 def test_modules_import_without_side_effects():
     # importing must not run the pipeline, need an API key, or need output files
     import importlib
-    for name in ["eval", "verifier", "critic", "report",
+    for name in ["eval", "verifier", "critic", "report", "uplift",
                  "mark_contacted", "archetype_eval", "train_model", "main"]:
         importlib.import_module(f"churn.{name}")
 
@@ -147,6 +147,27 @@ def test_report_sorts_and_groups():
     assert text.index("(#2)") < text.index("(#1)")        # highest prob first
     assert "### Retention calls (1)" in text and "### Coupons (1)" in text
     assert "unresolved support tickets" in text
+
+
+def test_uplift_is_reproducible_and_bounded():
+    from churn.uplift import run_uplift, winnability
+    assert winnability({"support_pain": 1, "delivery_pain": 1, "pickiness": 0}) == 0.6
+    assert winnability({"support_pain": 0, "delivery_pain": 0, "pickiness": 1}) == 0.0
+    truth = [{"user_id": i, "churned": True, "support_pain": 0.5,
+              "delivery_pain": 0.5, "pickiness": 0.5} for i in range(50)]
+    assert run_uplift(truth) == run_uplift(truth)
+
+
+def test_uplift_method_recovers_planted_effect():
+    import random
+    from churn.uplift import planted_effect, uplift_spread
+    rng = random.Random(0)
+    truth = [{"user_id": i, "churned": True, "support_pain": rng.random(),
+              "delivery_pain": rng.random(), "pickiness": rng.random()}
+             for i in range(200)]
+    spread = uplift_spread(truth, n_runs=300)
+    assert abs(spread["mean"] - planted_effect(truth)) < 0.03   # unbiased
+    assert spread["low"] < planted_effect(truth) < spread["high"]
 
 
 def test_oof_probabilities_cover_every_customer():
