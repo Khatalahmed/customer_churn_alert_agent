@@ -179,6 +179,33 @@ def test_oof_probabilities_cover_every_customer():
     assert ((oof > 0) & (oof < 1)).all()
 
 
+def test_no_timestamps_in_the_future():
+    # timestamps must be UTC (to match SQLite's datetime('now')) and never
+    # later than now - otherwise the login windows in the tools are shifted
+    from churn.config import connect_readonly
+    conn = connect_readonly()
+    checks = {
+        "auth_audit_log": "event_timestamp",
+        "orders": "placed_at",
+        "support_tickets": "created_at",
+        "reviews": "created_at",
+    }
+    for table, col in checks.items():
+        future = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE {col} > datetime('now')"
+        ).fetchone()[0]
+        assert future == 0, f"{future} rows in {table}.{col} are in the future"
+    conn.close()
+
+
+def test_iso_converts_ist_to_utc_and_caps_at_now(monkeypatch):
+    from datetime import datetime
+    import churn.quick_commerce_sim as sim
+    monkeypatch.setattr(sim, "SIM_NOW", datetime(2026, 9, 15, 10, 0, 0))
+    assert sim.iso(datetime(2026, 9, 15, 9, 0, 0)) == "2026-09-15 03:30:00"   # IST -> UTC
+    assert sim.iso(datetime(2026, 9, 15, 22, 0, 0)) == "2026-09-15 04:30:00"  # capped at now
+
+
 def test_pii_redaction():
     from churn.pii import redact
     dirty = "Contact Sameer at 9876543210 or sameer@example.com today"

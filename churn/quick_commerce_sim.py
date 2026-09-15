@@ -17,10 +17,10 @@ predictable from behaviour (real signal for an ML model, no leakage).
 
 USAGE
 -----
-    python quick_commerce_sim.py init
-    python quick_commerce_sim.py init --db ./qcommerce.db --days 150
-    python quick_commerce_sim.py live --db ./qcommerce.db --interval 2 --ticks 60
-    python quick_commerce_sim.py all --db ./qcommerce.db --days 120
+    python -m churn.quick_commerce_sim init
+    python -m churn.quick_commerce_sim init --db ./qcommerce.db --days 150
+    python -m churn.quick_commerce_sim live --db ./qcommerce.db --interval 2 --ticks 60
+    python -m churn.quick_commerce_sim all --db ./qcommerce.db --days 120
 """
 import argparse
 import hashlib
@@ -32,10 +32,12 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from .config import DB_PATH, TRUTH_PATH
+
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
-DEFAULT_DB_PATH = "qcommerce.db"
+DEFAULT_DB_PATH = DB_PATH
 DEFAULT_HISTORY_DAYS = 120          # >= 100 as required
 NUM_CUSTOMERS = 300                 # CHANGED: was 40 -- bigger set for real ML
 CHURN_FRACTION = 0.25               # (kept for reference, no longer used directly)
@@ -117,9 +119,24 @@ REVIEW_SNIPPETS = {
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+# "now" of the running simulation (naive IST). Set by cmd_init / cmd_live.
+SIM_NOW: datetime | None = None
+
+
 def iso(dt: datetime) -> str:
-    """Store timestamps as ISO strings (SQLite has no native datetime type)."""
-    return dt.isoformat(sep=" ", timespec="seconds")
+    """Store timestamps as UTC ISO strings (SQLite has no native datetime type).
+
+    The simulation runs in naive IST so ordering hours look realistic, but
+    SQLite's datetime('now') - used by every query - is UTC. This is the one
+    storage boundary, so we fix both problems here:
+      1. cap at SIM_NOW: business_hour_time() picks a random hour on a date,
+         which for today (or a ticket/review dated a day ahead) can land in
+         the future. min() keeps event order (login <= logout, etc.).
+      2. convert IST -> UTC so datetime('now', '-30 days') windows line up.
+    """
+    if SIM_NOW is not None:
+        dt = min(dt, SIM_NOW)
+    return (dt - IST.utcoffset(None)).isoformat(sep=" ", timespec="seconds")
 
 def fake_hash(seed: str) -> str:
     return "hash_" + hashlib.sha256(seed.encode()).hexdigest()[:16]
@@ -569,7 +586,7 @@ def backfill_history(conn, customers, product_ids, agent_ids, history_days, now)
 # --------------------------------------------------------------------------- #
 # Ground truth (the answer key for evaluation)
 # --------------------------------------------------------------------------- #
-def write_ground_truth(customers, path="churn_truth.json"):
+def write_ground_truth(customers, path=TRUTH_PATH):
     """Save the answer key: which customers were planted as churned.
 
     WHY : the database does not store the churn flag on purpose, because in
@@ -605,13 +622,14 @@ def write_ground_truth(customers, path="churn_truth.json"):
 # Commands
 # --------------------------------------------------------------------------- #
 def cmd_init(db_path, history_days, fresh=True):
-    global PRODUCT_PRICE_BY_ID
+    global PRODUCT_PRICE_BY_ID, SIM_NOW
     if fresh and os.path.exists(db_path):
         os.remove(db_path)
         print(f"Removed existing {db_path}")
     conn = connect(db_path)
     create_schema(conn)
     now = datetime.now(IST).replace(tzinfo=None)
+    SIM_NOW = now
     product_ids = seed_products(conn)
     cur = conn.cursor()
     cur.execute("SELECT product_id, price FROM products")
@@ -626,7 +644,7 @@ def cmd_init(db_path, history_days, fresh=True):
 
 def cmd_live(db_path, interval, ticks):
     """Simulate live traffic on an existing DB."""
-    global PRODUCT_PRICE_BY_ID
+    global PRODUCT_PRICE_BY_ID, SIM_NOW
     if not os.path.exists(db_path):
         print(f"DB {db_path} not found. Run `init` first.")
         return
@@ -645,6 +663,7 @@ def cmd_live(db_path, interval, ticks):
           f"({len(active)} active customers)...")
     for t in range(ticks):
         now = datetime.now(IST).replace(tzinfo=None)
+        SIM_NOW = now
         burst = random.randint(1, max(2, len(active) // 8))
         for user in random.sample(active, min(burst, len(active))):
             made_order = random.random() < 0.6
