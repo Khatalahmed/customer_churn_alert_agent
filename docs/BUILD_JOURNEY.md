@@ -291,6 +291,74 @@ the part everybody reads.*
 
 ---
 
+## STAGE 17 - A review of ten items, and the three numbers that got better
+
+An outside review listed ten things to fix, in priority order. Working
+through them changed four published numbers, and three of those changes made
+the project look BETTER - which is exactly why they needed checking rather
+than celebrating.
+
+**The statistics (items 1-3).** "Uplift" named two different quantities: the
+loop reported control minus treated as a percentage, while actions.py used
+"uplift" for the relative share of churners an intervention rescues, and
+priced everything with it. Now absolute_uplift_pp and relative_uplift, with
+the units in the names. "Conclusive" meant two per-arm intervals failing to
+overlap, which is not a test - overlap does not imply the absence of an
+effect, and 10/50 vs 2/50 (Fisher p = 0.028) was being called noise. Now
+Fisher's exact test, with Newcombe's interval on the difference.
+
+The sample-size hint multiplied summed variances by a flat 16 - the shortcut
+for AVERAGE variance - and named neither alpha nor power, so it asked for
+about twice what was needed. It also planned around a base rate of zero,
+floored at 1%, and demanded ~9,520 per arm. A retention experiment runs on
+the SHORTLIST, whose calibrated risk is 13.8%, not on the whole base at 1.4%.
+The answer is ~306 per arm, and "we cannot measure this" becomes "run it for
+a few weeks".
+
+**Two PR-AUCs for one model (item 4).** train_model said 0.069, baselines
+said 0.087, both labelled "XGBoost (this project)". The cause was a false
+claim in calibrate()'s own docstring: "Monotonic, so the ranking is
+unchanged." CalibratedClassifierCV with cv=folds averages a per-fold
+ensemble, so it reorders - rank correlation 0.984, precision@15 unchanged,
+PR-AUC down a fifth. The rank-preserving alternative was measured rather than
+argued about: exactly monotonic, but it spends 20% of the training customers
+and halves precision@15. The ensemble stays; baselines now scores what ships.
+
+**One window (item 5).** The model compared the last 14 days with the 14
+before; every module explaining the model compared 30 with 30. The evidence
+query also used SQL BETWEEN, so a login on the boundary was counted twice.
+Unifying them changed the output: with 30/60 windows the disengagement signal
+fired on 0 of 15 shortlisted customers, which is the real reason every
+earlier run reported "no HIGH verdicts at all". Over a fortnight it fires on
+4 of 15.
+
+And measuring it produced the most uncomfortable finding of the pass: the
+disengagement signal does not predict churn AT ALL. Customers whose logins
+fell churn at 0.91% against a 1.41% base rate - lift 0.64x, worse than
+random, the same answer the login-drop baseline gave. It stays as triage,
+because it decides what to DO with someone the model already picked, and
+rubric.py now says so in its own docstring.
+
+**Money, monitoring, definitions (items 6-9).** A save is now the present
+value of a decaying, discounted margin stream instead of a flat six months,
+and every recommendation carries a sensitivity band - 14 of 15 still pay at
+half the assumed uplift, the coupon never does. Drift watches three ways
+(PSI, KS, and the score distribution), and turning KS on immediately paged
+three times on nothing: at n~2,500 its 5% critical value is 0.038, so a
+cohort ageing by two orders is "significant". KS now has to clear a practical
+floor too. "Active" and "churned" moved out of a SQL clause into labels.py
+with the measurement attached: the label is reproducible from raw events, but
+it needs ~3 months of follow-up (94% precision) and is worthless at 14 days
+(11%), because a quiet customer and a departed one look identical until they
+have had time to come back. critic.py is labelled an experiment, with an AST
+test keeping it out of every live module.
+
+**Lesson:** *Three of the four corrected numbers moved in the flattering
+direction - a smaller experiment, a higher coverage, a cheaper answer. A
+reviewer who only checks the numbers that look bad audits half the work.*
+
+---
+
 ---
 
 ## The whole project in one line

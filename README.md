@@ -70,11 +70,12 @@ flowchart LR
 ## What it produces
 
 ```text
-DAILY CHURN SCAN  (analysis time 2026-08-04 06:30:00)
+DAILY CHURN SCAN  (data reference 2026-09-01 06:30:00, analysis time 2026-08-04 06:30:00)
 Scored 2561 active customers, skipped 0 contacted in the last 30 days
-Worklist: 15 customers, 14 worth acting on, Rs142 expected value
-  Aditya Gupta        MEDIUM    13%  automated we-miss-you email       Rs     20
-  Arjun Verma         MEDIUM    14%  automated we-miss-you email       Rs     16
+Worklist: 15 customers, 14 worth acting on, Rs188 expected value
+  Aditya Gupta        HIGH      13%  automated we-miss-you email       Rs     26
+  Arjun Verma         MEDIUM    14%  automated we-miss-you email       Rs     20
+  Neha Bose           HIGH      15%  automated we-miss-you email       Rs     16
 No alerts: inputs look like the training data.
 ```
 
@@ -82,15 +83,17 @@ Each customer arrives with the agent's reasoning, and a risk level that code —
 assigned from facts re-queried from the database:
 
 ```text
-[MEDIUM] user 1908 Ananya Nair  prob=13% -> automated we-miss-you email
-  reason: Dissatisfaction: unresolved delivery, payment, and refund issues, plus
-          2-star reviews about quality and leaking packaging. No disengagement:
-          logins rose from 0 to 17, supporting MEDIUM rather than HIGH.
+[MEDIUM] user 1908 Ananya Nair    prob=13% -> automated we-miss-you email
+  reason: Dissatisfaction is evidenced by four unresolved tickets covering
+          delivery delays, payment, and refund problems, plus two 2-star
+          reviews criticizing quality and leaking packaging. No disengagement:
+          logins increased from 7 to 10.
 
-[LOW   ] user  726 Tara Gupta   prob=14% -> no action
-  reason: No dissatisfaction: the unresolved ticket is a general account question,
-          the quality complaint is closed, and the review is 3 stars. No
-          disengagement: logins rose from 0 to 8.
+[LOW   ] user  726 Tara Gupta     prob=14% -> no action
+  reason: No qualifying dissatisfaction: the unresolved ticket is a general
+          account question, the product-quality ticket is closed, and the
+          3-star review mentioning slow delivery is above the dissatisfaction
+          threshold. No disengagement: logins increased from 3 to 5.
 ```
 
 ---
@@ -128,17 +131,25 @@ what a team would try first:
 | dormancy rule (days since last order) | 0.38 | 0.011 | 0.00 |
 | login drop (prev 14d − last 14d) | 0.40 | 0.012 | 0.00 |
 | logistic regression | 0.83 | 0.071 | 0.07 |
-| XGBoost (this project) | 0.83 | **0.087** | **0.13** |
+| XGBoost, raw scores (not shipped) | 0.83 | 0.087 | 0.13 |
+| **XGBoost, calibrated (this project)** | 0.84 | **0.069** | **0.13** |
 
 The classic **"no orders in 14 days" flag picks 353 customers and catches zero** of the 35
 churners. In this world quiet usually means a loyal low-frequency buyer; churn is driven by
 bad *experience*. Both quiet-customer rules score **worse than random**.
 
 Note what PR-AUC does that ROC-AUC cannot: it separates XGBoost from logistic regression
-(0.087 vs 0.071) where ROC-AUC calls them a tie at 0.83.
+where ROC-AUC calls them a tie at 0.83.
 
-Over all 10 cutoffs (train on everything earlier): XGBoost mean AUC **0.76**, precision@15
-**0.12**; logistic regression 0.77 / 0.10; the rules 0.40 / 0.04 and 0.41 / 0.01.
+The last two rows are the same booster. Calibration is a fold *ensemble*, not a monotonic
+rescale, so it reorders slightly: rank correlation 0.984, PR-AUC 0.087 → 0.069, precision@15
+unchanged. The calibrated row is what ships, and it is the number quoted everywhere else here.
+The genuinely rank-preserving alternative (fit once, calibrate on a held-out slice) was
+measured too — it costs 20% of the training customers and halves precision@15 to 0.067.
+
+Over all 10 cutoffs (train on everything earlier): the shipped calibrated model averages AUC
+**0.76**, precision@15 **0.11** (the raw scores get 0.12); logistic regression 0.77 / 0.10; the
+rules 0.40 / 0.04 and 0.41 / 0.01.
 
 ### How good could *any* model be here?
 
@@ -190,12 +201,12 @@ Latest live run on **`gpt-6-astra` via Azure OpenAI** (Responses API, keyless En
 
 | Metric | Result |
 |---|---|
-| Verdicts | 14 MEDIUM, 1 LOW — no HIGH: complaints, but customers still logging in |
+| Verdicts | 4 HIGH, 10 MEDIUM, 1 LOW |
 | Precision | 0.07 (1 of 14) — the ML shortlist decides who; the agent explains |
 | Evidence fidelity | **100%** — all 90 cited facts matched the database |
-| Prose fidelity | **100%** — 84 claims extracted from the written reasons, all supported (71% of clauses yielded a checkable claim) |
+| Prose fidelity | **100%** — 79 claims extracted from the written reasons, all supported (95% of clauses yielded a checkable claim) |
 | Trajectory | **9/9 rules** — ranked once, checked tickets *and* reviews for all 15, nobody off-list, no repeats, 31 calls within budget |
-| Cost | 267,252 in / 8,853 out tokens, ~2 minutes |
+| Cost | 266,192 in / 8,624 out tokens, ~2 minutes |
 
 **Trajectory evals** (`churn/trace_eval.py`) are the part most agent projects skip: precision
 tells you the verdict was right, not that the agent got there properly. Every tool call is
@@ -218,7 +229,12 @@ the checker is proven able to fail.
 Calibrated probabilities can be multiplied by money, so `churn/actions.py` matches a fix to the
 problem — an unresolved refund gets the ticket resolved, not a coupon — and prices it:
 
-**expected value = P(churn) × margin at risk × uplift − cost**
+**expected value = P(churn) × present value of the margin × uplift − cost**
+
+The margin is a decaying, discounted stream, not a flat multiple: a rescued customer can leave
+again (7% a month) and future money is worth less than money now (1% a month). The cost is paid
+for *every* customer contacted, including those who were never going to leave — which is most
+of them, and is why the cheap intervention wins.
 
 | Intervention | Margin at risk needed to break even at 14% churn |
 |---|---|
@@ -227,9 +243,14 @@ problem — an unresolved refund gets the ticket resolved, not a coupon — and 
 | automated email (₹5) | ₹714 |
 
 Nobody on the shortlist has more than ~₹4,000 at risk, so **no paid intervention pays for
-itself**. The plan downgrades to the near-free email — 14 of 15 customers, ₹142 total — and
-reports the break-even figure that *would* justify the real fix. At a 14% probability this
-shortlist justifies an automated email, not a human being's time.
+itself**. The plan downgrades to the near-free email — 14 of 15 customers, ₹188 total — and
+reports both figures that *would* justify the real fix: the margin at risk it needs, and the
+churn probability it needs. At a 14% probability this shortlist justifies an automated email,
+not a human being's time.
+
+Every recommendation also carries a **sensitivity band**: the same sum with the uplift
+assumption at half and one-and-a-half times. 14 of 15 stay positive even at half the assumed
+uplift; the ₹150 coupon never does, at any probability on this list.
 
 <sub>Margin rate, uplift and costs are assumptions, gathered at the top of `churn/actions.py`.
 The rupee figures are illustrative: they show the decision logic, not a business result.</sub>
@@ -240,17 +261,27 @@ The rupee figures are illustrative: they show the decision logic, not a business
 
 | Command | What it does |
 |---|---|
-| `python -m churn.pipeline` | the scheduled scan: score everyone, write `worklist.json`, check drift, **exit 2 on an alert** |
+| `python -m churn.pipeline` | the scheduled scan: score everyone, write `worklist.json`, check drift three ways, **exit 2 on an alert** |
 | `uvicorn churn.api:app` | `/health`, `/worklist`, `/customers/{id}`, `/contacted` — no LLM in the path, so answers are deterministic |
 | `python -m churn.outcomes` | log actions with a hold-out control, then measure the uplift that followed |
 | `python -m churn.retrain` | backtest whether refreshing the model beats leaving it stale, and promote if so |
 
 **Closing the loop.** 30% of the worklist is held back by a seeded random draw, because the
 customers you contact are the ones most likely to leave — without a control their churn rate
-looks terrible however well the coupon worked. Latest measurement: **−9% uplift,
-inconclusive** (1 of 11 treated churned, 0 of 4 controls, intervals overlapping). It also says
-what would settle it: **~9,500 customers per arm**. A 15-customer worklist cannot measure
-retention uplift, and saying so is the point.
+looks terrible however well the coupon worked. Latest measurement: **−9.1 percentage points,
+inconclusive** — 1 of 11 treated churned against 0 of 4 controls, Fisher exact **p = 1.00**, and
+the interval on the *difference* runs from −37.7 to +40.5 pp.
+
+Two units, because "9%" means two different things: −9.1 *percentage points* is the absolute
+gap, while the relative reduction is undefined here (there is no control churn to remove). The
+significance test is Fisher's exact, not the overlap of two per-arm intervals — overlap does not
+imply the absence of an effect, and the old rule called a real one (10/50 vs 2/50, p = 0.028)
+inconclusive.
+
+It also says what would settle it: **~306 customers per arm** for 80% power at α = 0.05 to
+detect a halving. Not 9,500 — that figure planned around a 1% floor when the control arm had no
+events. A retention experiment runs on the *shortlist*, whose calibrated risk is 13.8%, not on
+the whole customer base at 1.4%.
 
 **Retraining is a decision, not a habit.** Backtested over the snapshots: a model trained once
 and never refreshed scores PR-AUC 0.072; refreshed each period, 0.089. Refreshing wins, so it
@@ -274,8 +305,11 @@ Every decision below was **measured, not assumed**:
 | 🔍 **Verified prose, not just schema** | The structured fields were checked; the sentence a human reads was not. Claims are now extracted from the free text and re-queried — counts, categories, ratings, complaint content, absences — with coverage reported so unchecked never reads as correct. |
 | 🎯 **Risk picks, value orders** | Ranking the shortlist by risk × order value cost **40%** of its precision (0.073 vs 0.120): order value carries no churn signal. |
 | 💸 **An ROI that says no** | No paid intervention pays for itself on this shortlist; the honest recommendation is a ₹5 email, with the break-even figure that would change that. |
+| 📐 **One definition per concept** | Engagement was measured over 14/28 days by the model and 30/60 by everything explaining it, so the sentence described a different fortnight from the prediction. One window now, in `config`. It changed the output: over a fortnight the disengagement signal fires on 4 of 15, where the 30-day version fired on **0 of 15** — which is the real reason earlier runs never produced a HIGH. |
+| 🧪 **A significance test, not a glance** | "Conclusive" was two intervals failing to overlap. Overlap does not imply no effect: 10/50 vs 2/50 is Fisher p = 0.028 with overlapping intervals. Now Fisher's exact test plus an interval on the difference. |
+| 🔔 **Monitors that refuse to cry wolf** | Adding a KS test fired on three features immediately — at n≈2,500 its 5% critical value is 0.038, so a cohort ageing by two orders is "significant". KS must now clear both its critical value and a practical floor. |
 | 🔒 **Least-privilege + PII** | Read-only DB; tools never return phone/email; a redaction middleware scrubs any leak before the LLM. |
-| 🛠 **Production-ready** | Scheduled scan with alerting · FastAPI service · Docker · keyless Azure auth · 56 tests in GitHub Actions. |
+| 🛠 **Production-ready** | Scheduled scan with alerting · FastAPI service · Docker · keyless Azure auth · 80 tests in GitHub Actions. |
 
 ### Things I measured that did **not** work
 
@@ -290,6 +324,8 @@ Every decision below was **measured, not assumed**:
 | A 365-day history per customer | AUC 0.73 → 0.78, but top-15 lift 6.2× → 4.0× |
 | Exposure counts (orders/tickets/reviews) | **kept** — AUC 0.69 → 0.73, CV spread halved |
 | 3,000 customers instead of 1,500 | **kept** — AUC 0.73 → 0.76 |
+| Rank-preserving calibration (fit once, calibrate on a held-out slice) | exactly monotonic, but costs 20% of the training data: precision@15 0.13 → 0.067 |
+| The rubric's disengagement signal, as a *predictor* | customers whose logins fell churn at 0.91% vs a 1.41% base rate — lift **0.64×**, worse than random. Kept as triage, not as evidence. |
 
 ---
 
@@ -311,6 +347,8 @@ Every decision below was **measured, not assumed**:
 churn/
 ├── quick_commerce_sim.py  #   synthetic data: churn caused by bad experience, frozen clock
 ├── features.py            #   point-in-time snapshots + future (14-day) labels
+├── labels.py              #   who counts as active · churn derived from raw events
+├── logins.py              #   the one engagement-window query
 ├── train_model.py         #   XGBoost, grouped CV, calibration, out-of-time test
 ├── metrics.py             #   PR-AUC, precision/recall@K, Brier, calibration table
 ├── baselines.py           #   rules vs logistic regression vs XGBoost
@@ -326,7 +364,7 @@ churn/
 ├── explain.py             #   SHAP
 ├── archetype_eval.py      #   per-type recall + trap false-alarms
 ├── critic.py              #   a measured negative result
-├── uplift.py / drift.py   #   uplift method check + PSI drift
+├── uplift.py / drift.py   #   uplift method check + PSI / KS / prediction drift
 ├── pii.py / memory.py     #   redaction middleware + no re-nagging
 tests/  ·  docs/  ·  scripts/  ·  Dockerfile  ·  .github/
 ```
@@ -368,12 +406,13 @@ docker build -t churn-agent . && docker run --rm churn-agent uv run python -m ch
 
 ## Limitations
 
+- **The answer key buys time, not accuracy** — the same labels fall out of raw events (`labels.py`), but only with enough follow-up: ~98 days gives 94% precision against the key, 42 days gives 73%, and 14 days gives 11%, because a quiet customer is indistinguishable from a departed one until they have had time to come back.
 - **Synthetic data** — no real users. Results are framed as engineering and evaluation quality, never business impact.
 - **Rare events** — 473 churners across 3,000 customers, but only ~35 in any fortnight, so precision@15 moves 7 points per customer. The walk-forward means over 10 cutoffs are the trustworthy numbers; a single snapshot is not.
 - **A measured ceiling** — an oracle with the simulator's hidden state reaches precision@15 of 0.21; ours is 0.12. Most of the remaining gap is irreducible.
-- **Uplift cannot be measured here** — interventions change nothing in the simulator, and the sample would need ~9,500 per arm anyway. The loop reports that honestly instead of inventing a number.
+- **Uplift cannot be measured on 15 customers** — interventions change nothing in the simulator, and settling it would need ~306 per arm. The loop reports that honestly instead of inventing a number.
 - **Evaluated in the past** — the pipeline runs "as of" 2026-08-04 so its 14-day outcome is known. `CHURN_AS_OF=reference` scores the latest data, where no outcome exists yet.
-- **Prose is checked by pattern, not by comprehension.** The claim types the extractor knows cover 71% of clauses; the rest are rubric restatements ("Dissatisfaction: not established") with nothing to check. A clause nothing recognises is reported as unchecked, never as correct.
+- **Prose is checked by pattern, not by comprehension.** The claim types the extractor knows cover 95% of clauses; the rest are rubric restatements ("Dissatisfaction: not established") with nothing to check. A clause nothing recognises is reported as unchecked, never as correct.
 
 ---
 
