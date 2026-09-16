@@ -1,12 +1,19 @@
-.venv
-.git
-__pycache__
-*.db
-.env
-*.pkl
-churn_truth.json
-churn_predictions.json
-churn_predictions_reviewed.json
-contacted.json
-retention_report.md
-docs
+# Allowlist: ignore everything, then admit only what the API image needs.
+# A denylist leaks whatever lands in the checkout next - .env, the private
+# study sheet, a 500MB node_modules - so the default here is "no".
+*
+
+# how to install
+!.python-version
+!pyproject.toml
+!uv.lock
+
+# the service
+!churn/
+churn/__pycache__
+
+# The agent's output. Everything else the API reads (database, model, metrics,
+# action log) is rebuilt inside the image; these two come from a paid LLM run
+# and cannot be, so without them /investigations and /reliability are empty.
+!churn_predictions.json
+!agent_trace.json
