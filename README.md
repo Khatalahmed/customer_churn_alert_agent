@@ -244,8 +244,10 @@ of them, and is why the cheap intervention wins.
 
 Nobody on the shortlist has more than ~₹4,000 at risk, so **no paid intervention pays for
 itself**. The plan downgrades to the near-free email — 14 of 15 customers, ₹188 total — and
-reports both figures that *would* justify the real fix: the margin at risk it needs, and the
-churn probability it needs. At a 14% probability this shortlist justifies an automated email,
+keeps both figures that *would* justify the real fix, under names that say whose they are
+(`matched_fix_break_even_margin`, `matched_fix_break_even_probability`). The plain
+`break_even_*` fields always describe the action being recommended: a plan that recommends a ₹5
+email must not report the ₹5,952 break-even of the call it declined to make. At a 14% probability this shortlist justifies an automated email,
 not a human being's time.
 
 Every recommendation also carries a **sensitivity band**: the same sum with the uplift

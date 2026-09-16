@@ -1091,3 +1091,42 @@ def test_prose_checks_a_steady_login_claim():
     facts["logins"] = {"prev": 7, "recent": 7}
     good = check_prose("No disengagement: logins remained steady at 7.", facts)["claims"]
     assert [c["ok"] for c in good if c["kind"] == "login_steady"] == [True]
+
+
+def test_break_even_figures_describe_the_intervention_being_recommended():
+    # The invariant that catches the whole bug class: if a plan says an action
+    # is worth doing, that action's break-even margin must be BELOW the money
+    # at risk. The old code returned the matched fix's break-even next to a
+    # downgraded recommendation, so a plan could recommend a Rs 5 email while
+    # reporting a break-even of Rs 5,952 - above the customer's entire value.
+    from churn.actions import break_even_margin, break_even_probability, plan
+    verdict = {"risk_level": "MEDIUM", "dissatisfaction": True, "disengagement": False}
+    result = plan(verdict, 0.14, 500, 2.0, ["REFUND"])
+
+    assert result["downgraded_from"] == "resolve_open_ticket"
+    assert result["intervention"] == "email_nudge"
+    assert result["break_even_margin"] == pytest.approx(
+        break_even_margin(0.14, "email_nudge"), abs=0.01)
+    assert result["break_even_probability"] == pytest.approx(
+        break_even_probability(result["margin_at_risk"], "email_nudge"), abs=1e-4)
+
+    if result["worth_doing"]:
+        assert result["break_even_margin"] < result["margin_at_risk"]
+        assert result["break_even_probability"] < 0.14
+
+    # the matched fix's number is kept, under a name that says whose it is
+    assert result["matched_fix"] == "resolve_open_ticket"
+    assert result["matched_fix_break_even_margin"] == pytest.approx(
+        break_even_margin(0.14, "resolve_open_ticket"), abs=0.01)
+    assert result["matched_fix_break_even_margin"] > result["break_even_margin"]
+
+
+def test_no_matched_fix_keys_when_nothing_was_downgraded():
+    from churn.actions import break_even_margin, plan
+    verdict = {"risk_level": "MEDIUM", "dissatisfaction": False, "disengagement": True}
+    # a customer worth enough that the matched intervention pays on its own
+    result = plan(verdict, 0.9, 20000, 8.0)
+    assert result["worth_doing"] and "downgraded_from" not in result
+    assert "matched_fix" not in result
+    assert result["break_even_margin"] == pytest.approx(
+        break_even_margin(0.9, result["intervention"]), abs=0.01)

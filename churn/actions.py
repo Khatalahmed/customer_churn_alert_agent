@@ -176,12 +176,26 @@ def plan(verdict: dict, churn_probability: float, avg_order_value: float,
         if fallback["worth_doing"]:
             fallback["downgraded_from"] = intervention
             result = fallback
-    # break-even for the intervention the problem actually calls for: when we
-    # downgrade, this is the number that would justify the real fix
+    # A break-even figure is meaningless unless it says which intervention it
+    # describes. These used to be computed for the MATCHED fix and returned
+    # next to the recommended one, so a downgraded plan read "recommend the
+    # Rs 5 email, break-even margin Rs 5,952" - the coupon's number, wearing
+    # the email's label.
+    selected = result["intervention"]
     result["break_even_margin"] = round(
-        break_even_margin(churn_probability, intervention), 2)
+        break_even_margin(churn_probability, selected), 2)
     result["break_even_probability"] = round(
-        break_even_probability(result["margin_at_risk"], intervention), 4)
+        break_even_probability(result["margin_at_risk"], selected), 4)
+
+    # The matched fix's break-even is the interesting one after a downgrade -
+    # it says what would justify the fix the problem actually calls for -
+    # so it is kept, under a name that cannot be mistaken for the other.
+    if selected != intervention:
+        result["matched_fix"] = intervention
+        result["matched_fix_break_even_margin"] = round(
+            break_even_margin(churn_probability, intervention), 2)
+        result["matched_fix_break_even_probability"] = round(
+            break_even_probability(result["margin_at_risk"], intervention), 4)
     return result
 
 
