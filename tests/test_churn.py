@@ -1031,3 +1031,24 @@ def test_label_agreement_arithmetic():
     a = label_agreement({1, 2, 3}, {2, 3, 4})
     assert a["agree"] == 2 and a["precision"] == pytest.approx(2 / 3)
     assert label_agreement(set(), {1})["precision"] == 0.0
+
+
+def test_the_critic_experiment_is_not_wired_into_anything():
+    # critic.py is a kept negative result, not a component. If it ever gets
+    # imported by the running system, the risk level goes back to being an
+    # LLM opinion - the exact thing rubric.py exists to prevent.
+    import ast
+    import pathlib
+    live = ["pipeline", "api", "main", "scoring", "rubric", "actions",
+            "verifier", "prose_eval", "trace_eval", "eval", "outcomes",
+            "retrain", "features", "train_model", "labels"]
+    for name in live:
+        tree = ast.parse((pathlib.Path("churn") / f"{name}.py").read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.lstrip("."))
+            elif isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+        assert not any(m.split(".")[-1] == "critic" for m in imported), \
+            f"churn/{name}.py imports the critic experiment"

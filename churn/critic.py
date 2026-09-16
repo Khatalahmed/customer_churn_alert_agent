@@ -1,13 +1,27 @@
 """
 critic.py
 
-WHAT : A skeptical reviewer (a 4th agent) that re-checks each churn verdict
-       and can lower it if the evidence is weak. This is multi-agent debate:
-       one agent decides, another challenges. We measure precision before
-       and after the critic.
-WHY  : The first agent can be over-confident. A critic that catches false
-       alarms (e.g., a customer who still logs in often) makes the final
-       list more trustworthy.
+STATUS: NOT PART OF THE PIPELINE. This is a kept experiment, not a component.
+        Nothing in the scan, the API, the agent run or the evals imports it,
+        and a test enforces that. It is here because deleting a measured
+        negative result loses the measurement.
+
+WHAT : A skeptical fourth agent that re-judged each verdict from the evidence
+       and could lower it, to see whether multi-agent debate catches false
+       alarms. Run it with `python -m churn.critic` if you want to reproduce
+       the finding.
+WHY IT IS NOT USED : it was measured, and it made the shortlist worse. It
+       lowered real churners out of the flagged set - on a list where the
+       flagged set is already tiny, removing a true positive costs more
+       precision than removing several false ones gains. The skeptical prompt
+       below is doing what it was asked to do: "keep HIGH only if the evidence
+       clearly supports it" is exactly the wrong instruction when the base
+       rate is 1.4% and the evidence is always thin.
+ALSO : it predates the division of labour. Risk levels are now assigned by
+       churn/rubric.py in plain code, from facts re-queried from the database,
+       so a critic that edits risk_level would be overwriting a deterministic
+       verdict with an LLM opinion - the change this project made deliberately,
+       run backwards.
 FLOW : load predictions + answer key -> ask the critic LLM to re-judge each
        verdict from the evidence -> compare precision before vs after.
 """
