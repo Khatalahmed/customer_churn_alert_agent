@@ -9,7 +9,8 @@ WHY   : "HIGH risk - retention call" does not tell a team what to do or
        Rs 200 of monthly margin is worth less attention than a 9% customer
        worth Rs 900, and an unresolved refund needs the refund fixed, not a
        coupon on top of it.
-LOGIC: expected value = P(churn) x present value of the margin x uplift - cost.
+LOGIC: expected value = P(churn in the NEXT 14 DAYS) x present value of the
+       NEXT 12 MONTHS of margin x uplift - cost.
        P(churn) is calibrated (see train_model), so it can be multiplied by
        money honestly. EVERYTHING ELSE BELOW IS AN ASSUMPTION: margin rate,
        how many months of margin a save is worth, each intervention's uplift
@@ -19,6 +20,7 @@ LOGIC: expected value = P(churn) x present value of the margin x uplift - cost.
        measured business result.
 """
 from .rubric import SERIOUS_CATEGORIES
+from .config import HORIZON_DAYS
 
 # --- assumptions (replace with real finance numbers before believing any of it) ---
 MARGIN_RATE = 0.25          # gross margin on an order
@@ -38,22 +40,25 @@ VALUE_HORIZON_MONTHS = 12   # beyond this the discounted terms are rounding erro
 # value of Rs 10 built on an uplift nobody has measured is not a decision.
 UPLIFT_UNCERTAINTY = 0.5    # the true uplift could be half, or one and a half times
 
-# uplift = the share of would-be churners this intervention actually rescues.
-# Ordered by how specific the fix is: fixing the actual complaint beats a coupon.
+# Each uplift is deliberately named as an assumption.  A measured experimental
+# result is reported by outcomes.py and is never promoted here automatically:
+# an inconclusive, mixed-treatment experiment must not quietly overwrite the
+# business case used to price an intervention.
 INTERVENTIONS = {
     "resolve_open_ticket": {"label": "resolve the open ticket, then call",
-                            "uplift": 0.30, "cost": 250},
+                            "assumed_uplift": 0.30, "cost": 250},
     "delivery_credit":     {"label": "apologise + delivery credit",
-                            "uplift": 0.20, "cost": 150},
+                            "assumed_uplift": 0.20, "cost": 150},
     "replace_item":        {"label": "replace the item + apology",
-                            "uplift": 0.25, "cost": 300},
+                            "assumed_uplift": 0.25, "cost": 300},
     "coupon":              {"label": "win-back coupon",
-                            "uplift": 0.15, "cost": 150},
+                            "assumed_uplift": 0.15, "cost": 150},
     # an automated email costs almost nothing, so it pays off at far lower
     # risk than anything involving money or a human being
     "email_nudge":         {"label": "automated we-miss-you email",
-                            "uplift": 0.05, "cost": 5},
-    "none":                {"label": "no action", "uplift": 0.0, "cost": 0},
+                            "assumed_uplift": 0.05, "cost": 5},
+    "none":                {"label": "no action", "assumed_uplift": 0.0, "cost": 0,
+                            "assumed_uplift": 0.0, "cost": 0},
 }
 
 # which complaint category calls for which fix
@@ -109,20 +114,26 @@ def expected_value(churn_probability: float, avg_order_value: float,
                    orders_per_month: float, intervention: str) -> dict:
     """Money at risk, whether acting pays for itself, and how sure that is.
 
-    expected save = P(churn) x present value of the margin x uplift
+    expected save = P(churn in the next 14 days) x present value of the next
+    12 months of margin x ASSUMED intervention uplift.
     The cost is paid for EVERY customer contacted, including the ones who were
     never going to leave - which is why a cheap intervention wins here.
     """
     spec = INTERVENTIONS[intervention]
     margin_at_risk = margin_present_value(monthly_margin(avg_order_value, orders_per_month))
-    expected_save = churn_probability * margin_at_risk * spec["uplift"]
+    uplift = spec["assumed_uplift"]
+    expected_save = churn_probability * margin_at_risk * uplift
     value = expected_save - spec["cost"]
     # the same sum with the uplift assumption at its pessimistic and optimistic ends
-    low = churn_probability * margin_at_risk * spec["uplift"] * (1 - UPLIFT_UNCERTAINTY) - spec["cost"]
-    high = churn_probability * margin_at_risk * spec["uplift"] * (1 + UPLIFT_UNCERTAINTY) - spec["cost"]
+    low = churn_probability * margin_at_risk * uplift * (1 - UPLIFT_UNCERTAINTY) - spec["cost"]
+    high = churn_probability * margin_at_risk * uplift * (1 + UPLIFT_UNCERTAINTY) - spec["cost"]
     return {
         "intervention": intervention,
         "intervention_label": spec["label"],
+        "uplift_used": uplift,
+        "uplift_source": "assumed",
+        "risk_horizon_days": HORIZON_DAYS,
+        "value_horizon_months": VALUE_HORIZON_MONTHS,
         "margin_at_risk": round(margin_at_risk, 2),
         "cost": spec["cost"],
         "expected_save": round(expected_save, 2),
@@ -141,9 +152,9 @@ def break_even_probability(margin_at_risk: float, intervention: str) -> float:
     it" into two specific numbers that would change the answer.
     """
     spec = INTERVENTIONS[intervention]
-    if margin_at_risk <= 0 or spec["uplift"] <= 0:
+    if margin_at_risk <= 0 or spec["assumed_uplift"] <= 0:
         return float("inf")
-    return spec["cost"] / (margin_at_risk * spec["uplift"])
+    return spec["cost"] / (margin_at_risk * spec["assumed_uplift"])
 
 
 def break_even_margin(churn_probability: float, intervention: str) -> float:
@@ -154,9 +165,9 @@ def break_even_margin(churn_probability: float, intervention: str) -> float:
     YET, and here is the number that would change that".
     """
     spec = INTERVENTIONS[intervention]
-    if churn_probability <= 0 or spec["uplift"] <= 0:
+    if churn_probability <= 0 or spec["assumed_uplift"] <= 0:
         return float("inf")
-    return spec["cost"] / (churn_probability * spec["uplift"])
+    return spec["cost"] / (churn_probability * spec["assumed_uplift"])
 
 
 def plan(verdict: dict, churn_probability: float, avg_order_value: float,
@@ -236,3 +247,70 @@ def open_complaint_categories(conn, user_id: int, as_of: str) -> list[str]:
         (user_id, as_of, as_of, *SERIOUS_CATEGORIES),
     ).fetchall()
     return [r[0] for r in rows]
+
+
+def customer_money_batch(conn, user_ids: list[int], as_of: str) -> dict[int, dict]:
+    """Average order value and orders-per-month for a list of users in 2 queries.
+
+    Returns {user_id: {"avg_order_value": float, "orders_per_month": float}}.
+    Customers with no orders get zeros.  This replaces the N-call loop
+    in _customer_view() for the /worklist hot path.
+    """
+    if not user_ids:
+        return {}
+    placeholders = ",".join("?" * len(user_ids))
+    result = {uid: {"avg_order_value": 0.0, "orders_per_month": 0.0} for uid in user_ids}
+
+    # Recent window (last RECENT_DAYS): both AOV and order count
+    for uid, aov, n in conn.execute(
+        f"""SELECT user_id, AVG(total_amount), COUNT(*) FROM orders
+            WHERE placed_at < ? AND placed_at >= datetime(?, '-{RECENT_DAYS} days')
+              AND user_id IN ({placeholders})
+            GROUP BY user_id""",
+        (as_of, as_of, *user_ids),
+    ):
+        if uid in result and aov is not None:
+            result[uid]["avg_order_value"] = float(aov)
+            result[uid]["orders_per_month"] = float(n) / (RECENT_DAYS / 30)
+
+    # Lifetime AOV fallback for customers with no recent orders
+    no_recent = [uid for uid, v in result.items() if v["avg_order_value"] == 0.0]
+    if no_recent:
+        fb_placeholders = ",".join("?" * len(no_recent))
+        for uid, aov in conn.execute(
+            f"""SELECT user_id, AVG(total_amount) FROM orders
+               WHERE placed_at < ? AND user_id IN ({fb_placeholders})
+               GROUP BY user_id""",
+            (as_of, *no_recent),
+        ):
+            if uid in result and aov is not None:
+                result[uid]["avg_order_value"] = float(aov)
+
+    return result
+
+
+def open_complaint_categories_batch(
+    conn, user_ids: list[int], as_of: str
+) -> dict[int, list[str]]:
+    """Categories of still-open serious complaints for a list of users in 1 query.
+
+    Returns {user_id: [category, ...]} ordered by most recent complaint first.
+    Users with no open complaints get an empty list.
+    """
+    if not user_ids:
+        return {uid: [] for uid in user_ids}
+    placeholders = ",".join("?" * len(user_ids))
+    cat_placeholders = ",".join("?" * len(SERIOUS_CATEGORIES))
+    result: dict[int, list[str]] = {uid: [] for uid in user_ids}
+    for uid, category in conn.execute(
+        f"""SELECT user_id, category FROM support_tickets
+            WHERE created_at < ?
+              AND (resolved_at IS NULL OR resolved_at >= ?)
+              AND category IN ({cat_placeholders})
+              AND user_id IN ({placeholders})
+            ORDER BY user_id, created_at DESC""",
+        (as_of, as_of, *SERIOUS_CATEGORIES, *user_ids),
+    ):
+        if uid in result and category not in result[uid]:
+            result[uid].append(category)   # first per category, most recent first
+    return result

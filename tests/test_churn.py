@@ -266,6 +266,37 @@ def test_uplift_measures_what_happened(tmp_path):
     assert perfect["conclusive"], "a total separation must not read as noise"
 
 
+def test_experiment_separates_a_single_measured_action_from_a_policy_bundle(tmp_path):
+    from churn.outcomes import log_actions, measure_uplift
+    worklist = {"analysis_time": "2026-08-04 06:30:00", "customers": [
+        {"user_id": i, "churn_probability": i / 100, "expected_value": 10,
+         "intervention": "coupon" if i % 2 else "email_nudge"} for i in range(1, 41)]}
+    single = log_actions(worklist, path=tmp_path / "single.json", seed=2,
+                         experiment_intervention="email_nudge")
+    result = measure_uplift(single, churned_ids=set())
+    assert result["measured_uplift"]["status"] == "measured"
+    assert result["measured_uplift"]["intervention"] == "email_nudge"
+    assert not result["measured_uplift"]["ready_to_replace_assumption"]
+
+    mixed = log_actions(worklist, path=tmp_path / "mixed.json", seed=2)
+    bundled = measure_uplift(mixed, churned_ids=set())
+    assert bundled["measured_uplift"]["status"] == "policy_bundle_only"
+
+
+def test_batch_facts_and_money_match_the_single_customer_queries():
+    from churn.actions import customer_money, customer_money_batch
+    from churn.config import analysis_time, connect_readonly
+    from churn.verifier import real_facts, real_facts_batch
+    conn = connect_readonly()
+    as_of = analysis_time(conn)
+    ids = [1, 2, 3]
+    assert real_facts_batch(conn, ids, as_of) == {
+        uid: real_facts(conn, uid, as_of) for uid in ids}
+    assert customer_money_batch(conn, ids, as_of) == {
+        uid: customer_money(conn, uid, as_of) for uid in ids}
+    conn.close()
+
+
 def test_horizon_gate_blocks_early_measurement(tmp_path):
     from churn.outcomes import horizon_passed
     log = {"analysis_time": "2026-08-04 06:30:00", "horizon_days": 14}
@@ -915,6 +946,26 @@ def test_expected_value_reports_how_wrong_it_could_be():
     assert spec["robust"] is False
 
 
+def test_expected_value_labels_its_time_scales_and_assumed_uplift():
+    from churn.actions import VALUE_HORIZON_MONTHS, expected_value
+    from churn.config import HORIZON_DAYS
+    value = expected_value(0.14, 500, 2.0, "email_nudge")
+    assert value["risk_horizon_days"] == HORIZON_DAYS == 14
+    assert value["value_horizon_months"] == VALUE_HORIZON_MONTHS == 12
+    assert value["uplift_source"] == "assumed"
+    assert value["uplift_used"] == 0.05
+
+
+def test_precision_bootstrap_keeps_labels_paired_with_scores():
+    from churn.metrics import precision_at_k_bootstrap_ci
+    # With this seed the first bootstrap draw is rows [0, 1].  Pairing keeps
+    # the positive label next to its high score; drawing labels and scores
+    # independently (the old bug) gives a different answer.
+    y = np.array([1, 0])
+    score = np.array([0.99, 0.01])
+    assert precision_at_k_bootstrap_ci(y, score, 1, n_boot=1, seed=42) == (1.0, 1.0)
+
+
 def test_break_even_probability_is_the_point_where_it_pays():
     from churn.actions import break_even_probability, expected_value
     margin = expected_value(0.1, 500, 2.0, "coupon")["margin_at_risk"]
@@ -991,6 +1042,37 @@ def test_active_means_ordered_or_logged_in(tmp_path):
                       logins=[(2, "2026-07-21 10:00:00"),        # logged in, no order
                               (3, "2026-05-01 10:00:00")])       # too long ago
     assert active_customers(conn, "2026-08-04 06:30:00") == {1, 2}
+
+
+def test_active_window_is_left_inclusive_and_cutoff_exclusive(tmp_path):
+    # The cohort is [T - 28 days, T): an event at the opening boundary counts,
+    # while an event exactly at prediction time is future information.
+    from churn.labels import active_customers
+    as_of = "2026-08-04 06:30:00"
+    conn = _events_db(tmp_path, orders=[
+        (1, "2026-07-07 06:30:00"),  # T - 28d: included
+        (2, as_of),                   # T: excluded
+    ])
+    assert active_customers(conn, as_of) == {1}
+
+
+def test_churn_label_is_future_only_and_includes_the_horizon_endpoint(tmp_path):
+    # Labels use (T, T + 14d]: already-gone customers are removed, and an
+    # event at the end of the declared horizon belongs to that horizon.
+    from churn.features import add_labels
+    from churn.config import HORIZON_DAYS
+    frame = pd.DataFrame({"user_id": [1, 2, 3],
+                          "as_of": ["2026-08-04 06:30:00"] * 3})
+    truth = [
+        {"user_id": 1, "churned": True, "active_until": "2026-08-04 06:30:00"},
+        {"user_id": 2, "churned": True, "active_until": "2026-08-18 06:30:00"},
+        {"user_id": 3, "churned": True, "active_until": "2026-08-18 06:30:01"},
+    ]
+    path = tmp_path / "truth.json"
+    path.write_text(json.dumps(truth))
+    labelled = add_labels(frame, truth_path=path)
+    assert HORIZON_DAYS == 14
+    assert labelled.set_index("user_id")["churned"].to_dict() == {2: 1, 3: 0}
 
 
 def test_observable_churn_admits_when_it_has_not_waited_long_enough(tmp_path):

@@ -19,7 +19,8 @@ import sys
 
 import joblib
 
-from .actions import CURRENCY, customer_money, open_complaint_categories, plan
+from .actions import (CURRENCY, customer_money_batch,
+                      open_complaint_categories_batch, plan)
 from .config import (MODEL_PATH, TRAIN_CUTOFFS_DAYS, WORKLIST_PATH, analysis_time,
                      connect_readonly, reference_now)
 from .drift import feature_drift, prediction_drift
@@ -27,7 +28,7 @@ from .features import build_features, build_snapshots
 from .memory import recently_contacted_ids
 from .rubric import assess
 from .scoring import score_customers
-from .verifier import real_facts
+from .verifier import real_facts_batch
 
 DRIFT_THRESHOLD = 0.2
 
@@ -40,13 +41,20 @@ def build_worklist(top_n: int = 15) -> dict:
     skip = recently_contacted_ids(days=30)
     shortlist = df[~df["user_id"].isin(skip)].nlargest(top_n, "churn_probability")
 
+    # Keep the scheduled job on the same bounded-query path as the API.  The
+    # old loop made four evidence, two money and one category query PER person.
+    # These batches make the worklist cost seven queries regardless of top_n.
+    user_ids = [int(row["user_id"]) for _, row in shortlist.iterrows()]
+    facts_by_user = real_facts_batch(conn, user_ids, as_of)
+    money_by_user = customer_money_batch(conn, user_ids, as_of)
+    categories_by_user = open_complaint_categories_batch(conn, user_ids, as_of)
     customers = []
     for _, row in shortlist.iterrows():
         uid = int(row["user_id"])
-        verdict = assess(real_facts(conn, uid, as_of))
-        money = customer_money(conn, uid, as_of)
+        verdict = assess(facts_by_user[uid])
+        money = money_by_user[uid]
         action = plan(verdict, float(row["churn_probability"]), money["avg_order_value"],
-                      money["orders_per_month"], open_complaint_categories(conn, uid, as_of))
+                      money["orders_per_month"], categories_by_user[uid])
         customers.append({"user_id": uid, "full_name": row["full_name"],
                           "churn_probability": round(float(row["churn_probability"]), 4),
                           **verdict, **money, **action})

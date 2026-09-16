@@ -66,7 +66,8 @@ export default async function AnalyticsPage() {
       <div className="rounded-[var(--radius-card)] border border-[var(--medium-border)] bg-[var(--medium-soft)] px-4 py-3">
         <p className="text-[12px] leading-relaxed text-[var(--text-muted)]">
           <strong className="font-medium text-[var(--medium)]">Illustrative figures.</strong>{" "}
-          {economics.note}. Every rupee below follows from the assumptions in the panel at the
+          {/* the backend's note already ends in a full stop, so this one does not add another */}
+          {economics.note} Every rupee below follows from the assumptions in the panel at the
           bottom of this page; replace them with real finance numbers before believing any of it.
         </p>
       </div>
@@ -81,7 +82,7 @@ export default async function AnalyticsPage() {
             <tr>
               <Th>Intervention</Th>
               <Th align="right">Cost</Th>
-              <Th align="right">Assumed uplift</Th>
+              <Th align="right">Uplift</Th>
               <Th align="right">Break-even margin</Th>
               <Th>Reach on this worklist</Th>
             </tr>
@@ -98,7 +99,10 @@ export default async function AnalyticsPage() {
                       {money(intervention.cost, currency)}
                     </Td>
                     <Td align="right" className="tnum">
-                      {percent(intervention.uplift, 0)}
+                      {percent(intervention.assumed_uplift, 0)}
+                      <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--text-subtle)]">
+                        {intervention.uplift_source}
+                      </span>
                     </Td>
                     <Td align="right" className="tnum">
                       {intervention.break_even_margin === null

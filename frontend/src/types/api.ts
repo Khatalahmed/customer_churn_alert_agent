@@ -237,7 +237,9 @@ export type Economics = Maybe<{
   interventions: {
     key: string;
     label: string;
-    uplift: number;
+    /** Assumed, never measured — the field name says so on purpose. */
+    assumed_uplift: number;
+    uplift_source: string;
     cost: number;
     break_even_margin: number | null;
   }[];

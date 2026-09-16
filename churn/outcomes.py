@@ -2,23 +2,30 @@
 outcomes.py
 
 WHAT : Closes the loop. Logs what we did to whom (holding back a random
-       control group), then - once the horizon has passed - checks what
+       control group), then — once the horizon has passed — checks what
        actually happened and measures the uplift we really got.
-WHY   : Everything upstream is a prediction. This is the only part that finds
-       out whether acting on it helped. Without a hold-out you cannot: the
-       customers you contact are the ones most likely to leave, so their
-       churn rate looks terrible however well the coupon worked.
-FLOW  : log_actions() writes an action log, assigning a share of the worklist
-        to a control group that gets nothing -> later, measure_uplift() joins
-        the log with what happened and reports both rates, the difference,
-        and a confidence interval.
-LOGIC: the control group is chosen by a seeded random draw, so it is
-       reproducible and not "the ones we felt like skipping" - self-selected
-       controls are how uplift measurements lie.
-NOTE : in THIS simulator an intervention changes nothing about a customer's
-       future, so an honest loop should measure an uplift of roughly zero.
-       That is the point: the machinery reports what happened, including
-       "nothing". Real uplift needs real interventions.
+
+WHAT IT MEASURES
+  The intervention experiment: did acting on the model's shortlist
+  reduce churn, compared to a random hold-out group that got nothing?
+  Reports absolute uplift (percentage points of churn avoided), relative
+  uplift (share of would-be churn removed), a Fisher exact p-value, and
+  a Newcombe confidence interval on the difference.
+
+WHAT IT DOES NOT MEASURE
+  - Whether the model's predictions are accurate (that is eval.py / metrics.py).
+  - Whether a specific intervention's assumed uplift (in actions.py) is correct;
+    the experiment measures the NET effect of (model targeting + intervention),
+    not the intervention in isolation.
+  - Anything about customers NOT in the worklist (the control group is a hold-out
+    from the worklist, not a random sample of the whole customer base).
+
+WHEN TO UPDATE
+  Run `python -m churn.outcomes` after every worklist cycle once the horizon
+  has passed (horizon_days after the analysis time).
+  The reported sample sizes will almost certainly be too small to be conclusive
+  at this scale; the power calculation shows how many customers per arm would
+  be needed to settle the question.
 """
 import json
 import math
@@ -27,7 +34,13 @@ from datetime import datetime, timedelta
 
 from .config import ACTION_LOG_PATH, HORIZON_DAYS
 
-CONTROL_FRACTION = 0.3          # held back, gets nothing, so uplift is measurable
+# The previous 15-person worklist with a 30% control arm could never answer a
+# causal question.  A dedicated experiment uses a 600-person cohort, balanced
+# 1:1, which targets the ~300 customers per arm required by the power plan.
+CONTROL_FRACTION = 0.5
+EXPERIMENT_COHORT_SIZE = 600
+EXPERIMENT_TARGET_PER_ARM = EXPERIMENT_COHORT_SIZE // 2
+EXPERIMENT_INTERVENTION = "email_nudge"
 ALPHA = 0.05                    # two-sided significance level for "conclusive"
 MIN_EVENTS_FOR_PLANNING = 5     # below this, an observed rate is not worth planning on
 
@@ -46,20 +59,54 @@ def assign_control(user_ids, fraction: float = CONTROL_FRACTION, seed: int = 42)
     return set(rng.sample(ids, n_control)) if n_control else set()
 
 
-def log_actions(worklist: dict, path=ACTION_LOG_PATH, seed: int = 42) -> dict:
-    """Record who we would act on, who is held back, and what we predicted."""
+def assign_control_stratified(customers: list[dict], fraction: float = CONTROL_FRACTION,
+                              seed: int = 42, strata: int = 10) -> set:
+    """Randomise within risk bands so treatment and control start comparable.
+
+    Ranking drives selection, so a simple draw can put too many of the very
+    highest-risk customers in one arm.  We split the already-selected cohort
+    into contiguous probability bands and randomise within each band.  This
+    preserves random assignment while avoiding avoidable baseline imbalance.
+    """
+    ranked = sorted(customers, key=lambda c: (-float(c["churn_probability"]), c["user_id"]))
+    rng = random.Random(seed)
+    control: set[int] = set()
+    for start in range(0, len(ranked), max(1, math.ceil(len(ranked) / strata))):
+        band = ranked[start:start + max(1, math.ceil(len(ranked) / strata))]
+        n_control = round(len(band) * fraction)
+        control.update(rng.sample([c["user_id"] for c in band], n_control))
+    return control
+
+
+def log_actions(worklist: dict, path=ACTION_LOG_PATH, seed: int = 42,
+                experiment_intervention: str | None = None) -> dict:
+    """Record a randomised intervention experiment without changing the model.
+
+    `experiment_intervention` makes every treated customer receive one named
+    action.  This is essential: a mixed bundle can estimate the policy's net
+    effect, but cannot measure the uplift of any individual intervention.
+    """
     customers = worklist["customers"]
-    control = assign_control([c["user_id"] for c in customers], seed=seed)
+    control = assign_control_stratified(customers, seed=seed)
     entries = [{
         "user_id": c["user_id"],
         "as_of": worklist["analysis_time"],
         "group": "control" if c["user_id"] in control else "treated",
-        "intervention": "none" if c["user_id"] in control else c["intervention"],
+        "intervention": "none" if c["user_id"] in control else (
+            experiment_intervention or c["intervention"]),
+        "recommended_intervention": c["intervention"],
         "churn_probability": c["churn_probability"],
         "expected_value": c["expected_value"],
     } for c in customers]
     log = {"analysis_time": worklist["analysis_time"],
-           "horizon_days": HORIZON_DAYS, "entries": entries}
+           "horizon_days": HORIZON_DAYS,
+           "experiment": {
+               "assignment": "stratified random 1:1 treatment/control by churn-risk band",
+               "intervention": experiment_intervention,
+               "target_per_arm": EXPERIMENT_TARGET_PER_ARM if experiment_intervention else None,
+               "uplift_status": "measured after the horizon; not used in expected value automatically",
+           },
+           "entries": entries}
     with open(path, "w") as f:
         json.dump(log, f, indent=2)
     return log
@@ -206,7 +253,33 @@ def measure_uplift(log: dict, churned_ids: set) -> dict:
         c["churned"], c["n"] - c["churned"], t["churned"], t["n"] - t["churned"]), 4)
     result["conclusive"] = result["p_value"] < ALPHA
     rate, basis = planning_base_rate(log, c["churned"], c["n"])
-    result["power"] = {**sample_size_per_arm(rate), "base_rate_from": basis}
+    power = sample_size_per_arm(rate)
+    # underpowered: the actual per-arm n is < 10% of what 80%-power requires.
+    # This is not a binary pass/fail — it shows HOW far the experiment falls
+    # short, so the power table can be read in context.
+    actual_per_arm = min(t["n"], c["n"])
+    required = power["per_arm"]
+    result["power"] = {**power, "base_rate_from": basis,
+                       "actual_per_arm": actual_per_arm}
+    result["underpowered"] = (required > 0 and actual_per_arm < required * 0.10)
+    experiment = log.get("experiment", {})
+    treated_actions = {e.get("intervention") for e in log["entries"]
+                       if e.get("group") == "treated"}
+    one_intervention = len(treated_actions) == 1
+    action = next(iter(treated_actions), None) if one_intervention else None
+    result["measured_uplift"] = {
+        "status": "measured" if one_intervention else "policy_bundle_only",
+        "intervention": action,
+        "scope": ("randomised net effect of the named intervention versus no action "
+                  "within this model-selected cohort" if one_intervention else
+                  "randomised net effect of a mixed intervention policy; not an intervention-specific uplift"),
+        "relative_uplift": result["relative_uplift"],
+        "absolute_uplift_pp": result["absolute_uplift_pp"],
+        "conclusive": result["conclusive"],
+        "ready_to_replace_assumption": bool(one_intervention and result["conclusive"]),
+        "target_per_arm": experiment.get("target_per_arm"),
+        "additional_per_arm_needed": max(0, (experiment.get("target_per_arm") or 0) - actual_per_arm),
+    }
     return result
 
 
@@ -225,7 +298,11 @@ def main():
     now = reference_now(conn)
     conn.close()
 
-    log = log_actions(build_worklist())
+    # Deliberately separate from the 15-person operating worklist.  This is a
+    # low-cost, single-treatment experiment with 300 treated and 300 control
+    # customers; it measures an email nudge, not a heterogeneous policy.
+    log = log_actions(build_worklist(top_n=EXPERIMENT_COHORT_SIZE),
+                      experiment_intervention=EXPERIMENT_INTERVENTION)
     churned = future_churners(log["analysis_time"])
     ready = horizon_passed(log, now)
 

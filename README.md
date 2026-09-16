@@ -190,6 +190,26 @@ guess, 10 in 40 is a fact.
 
 ---
 
+## What each number means
+
+This project deliberately keeps three kinds of evidence separate. They must
+not be added together or used as substitutes for one another.
+
+| Category | What it answers | Current source | What it does **not** prove |
+|---|---|---|---|
+| **ML metrics** | Can the calibrated model rank customers who will stop being active in the **next 14 days**? | Held-out point-in-time snapshot: PR-AUC, Precision@K with bootstrap interval, Recall@K, Brier, ECE and calibration curve | That an intervention works or that a customer will certainly churn |
+| **Agent metrics** | Did the investigation use the right tools and state facts supported by the database? | Evidence fidelity, prose fidelity/coverage, and trajectory rules | That the model ranking improved or that the action created value |
+| **Business assumptions** | Is a proposed action economically plausible? | Assumed margin rate, action cost, assumed intervention uplift, 12-month discounted value horizon | A measured causal uplift or realised revenue |
+| **Business measurement** | Did one named action reduce churn in the selected cohort? | A stratified, 1:1 randomised treatment/control experiment after its 14-day outcome window | An estimate for a different intervention, population, or an inconclusive trial |
+
+The expected-value formula deliberately crosses two time scales: it applies a
+**14-day churn probability** to the present value of a rescued customer's
+**next 12 months of margin**. That is a planning assumption about the value of
+a save, not a claim that the 14-day model predicts 12-month churn. Every
+recommendation returns both horizons and labels the uplift used as `assumed`.
+A measured experiment is reported separately and never silently replaces that
+assumption.
+
 ## The division of labour (and what the agent is actually worth)
 
 The agent used to assign the risk levels. Measured, its verdicts added nothing to precision

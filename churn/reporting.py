@@ -288,7 +288,8 @@ def economics(example_probability: float = 0.14) -> dict:
         "available": True,
         "currency": CURRENCY,
         "illustrative": True,
-        "note": "margin rate, uplift and costs are assumptions - the logic is the product, not the rupees",
+        "note": ("risk is predicted over 14 days; saved margin is valued over 12 months. "
+                 "Costs and intervention uplifts are assumptions, not measured business results."),
         "assumptions": {
             "margin_rate": MARGIN_RATE,
             "monthly_survival": MONTHLY_SURVIVAL,
@@ -302,9 +303,10 @@ def economics(example_probability: float = 0.14) -> dict:
         "interventions": [
             {"key": key,
              "label": spec["label"],
-             "uplift": spec["uplift"],
+             "assumed_uplift": spec["assumed_uplift"],
+             "uplift_source": "assumed",
              "cost": spec["cost"],
-             "break_even_margin": (None if spec["uplift"] <= 0 else
+             "break_even_margin": (None if spec["assumed_uplift"] <= 0 else
                                    round(break_even_margin(example_probability, key), 2))}
             for key, spec in INTERVENTIONS.items()
         ],

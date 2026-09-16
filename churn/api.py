@@ -17,13 +17,14 @@ RUN   : uv run uvicorn churn.api:app --reload
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .actions import CURRENCY, customer_money, open_complaint_categories, plan
+from .actions import (CURRENCY, customer_money, customer_money_batch,
+                       open_complaint_categories, open_complaint_categories_batch, plan)
 from .config import analysis_time, connect_readonly, reference_now
 from .memory import mark_contacted, recently_contacted_ids
 from . import reporting
 from .rubric import assess
 from .scoring import score_customers
-from .verifier import real_facts
+from .verifier import real_facts, real_facts_batch
 
 app = FastAPI(
     title="Churn early-warning",
@@ -66,6 +67,42 @@ def _customer_view(conn, row, as_of: str) -> dict:
     }
 
 
+def _customer_views_batch(conn, shortlist, as_of: str) -> list[dict]:
+    """Build the risk+evidence+action view for every customer in shortlist.
+
+    Replaces the per-customer loop that called _customer_view() N times
+    (45 queries for top_n=15) with 7 queries regardless of shortlist size:
+      1-4  real_facts_batch  (logins, orders, tickets, serious+worst)
+      5-6  customer_money_batch  (recent AOV + count, lifetime AOV fallback)
+      7    open_complaint_categories_batch
+    """
+    user_ids = [int(row["user_id"]) for _, row in shortlist.iterrows()]
+    all_facts      = real_facts_batch(conn, user_ids, as_of)
+    all_money      = customer_money_batch(conn, user_ids, as_of)
+    all_categories = open_complaint_categories_batch(conn, user_ids, as_of)
+
+    result = []
+    for _, row in shortlist.iterrows():
+        uid = int(row["user_id"])
+        facts      = all_facts.get(uid, {})
+        money      = all_money.get(uid, {"avg_order_value": 0.0, "orders_per_month": 0.0})
+        categories = all_categories.get(uid, [])
+        verdict    = assess(facts)
+        action     = plan(verdict, float(row["churn_probability"]),
+                          money["avg_order_value"], money["orders_per_month"], categories)
+        result.append({
+            "user_id": uid,
+            "full_name": row["full_name"],
+            "churn_probability": round(float(row["churn_probability"]), 4),
+            **verdict,
+            "evidence": facts,
+            **money,
+            **action,
+            "currency": CURRENCY,
+        })
+    return result
+
+
 class ContactedRequest(BaseModel):
     user_ids: list[int] = Field(description="Customers the team has just contacted")
 
@@ -92,7 +129,9 @@ def worklist(top_n: int = 15) -> dict:
     shortlist = df[~df["user_id"].isin(skip)].nlargest(top_n, "churn_probability")
 
     conn = connect_readonly()
-    customers = [_customer_view(conn, row, as_of) for _, row in shortlist.iterrows()]
+    # Batch path: 7 queries total regardless of shortlist size.
+    # The single-customer path (/customers/{id}) still uses _customer_view().
+    customers = _customer_views_batch(conn, shortlist, as_of)
     conn.close()
 
     customers.sort(key=lambda c: c["expected_value"], reverse=True)

@@ -31,7 +31,9 @@ from xgboost import XGBClassifier
 from .config import (HORIZON_DAYS, METRICS_PATH, MODEL_PATH, TEST_CUTOFF_DAYS,
                      TRAIN_CUTOFFS_DAYS)
 from .features import build_snapshots
-from .metrics import brier, calibration_table, pr_auc, precision_at_k, recall_at_k
+from .metrics import (average_precision_at_k, brier, calibration_curve_data,
+                       calibration_table, ece, pr_auc, precision_at_k,
+                       precision_at_k_bootstrap_ci, recall_at_k)
 
 
 def make_model(y_train) -> XGBClassifier:
@@ -124,13 +126,18 @@ if __name__ == "__main__":
     print(f"PR-AUC:    {pr_auc(y_test, cal_proba):.3f}   vs {base_rate:.3f} floor "
           f"= {pr_auc(y_test, cal_proba) / base_rate:.1f}x  <- the honest summary")
 
-    print(f"\n{'K':>5}{'precision':>11}{'lift':>8}{'recall':>9}   (the agent investigates K)")
+    print(f"\n{'K':>5}{'precision (95% CI)':>22}{'AP@K':>8}{'lift':>8}{'recall':>9}"
+          "   (the operating shortlist and its uncertainty)")
     for k in (15, 30, 50, 100):
         p, r = precision_at_k(y_test, cal_proba, k), recall_at_k(y_test, cal_proba, k)
-        print(f"{k:>5}{p:>11.2f}{p / base_rate:>7.1f}x{r:>9.2f}")
+        lo, hi = precision_at_k_bootstrap_ci(y_test, cal_proba, k)
+        ap = average_precision_at_k(y_test, cal_proba, k)
+        print(f"{k:>5}{p:>11.2f} ({lo:.2f}-{hi:.2f}){ap:>8.2f}{p / base_rate:>7.1f}x{r:>9.2f}")
 
     print(f"\nCalibration (Brier, lower is better): raw {brier(y_test, raw_proba):.4f}"
           f"  ->  calibrated {brier(y_test, cal_proba):.4f}")
+    print(f"ECE (equal-width, 10 bins):  {ece(y_test, cal_proba):.4f}   "
+          f"(0 = perfect; measures average probability gap per bin)")
     print(f"{'risk bucket':>16}{'predicted':>11}{'observed':>10}{'customers':>11}")
     for row in calibration_table(y_test, cal_proba):
         print(f"{row['bucket']:>16}{row['predicted']:>11.3f}{row['observed']:>10.3f}{row['n']:>11}")
@@ -159,15 +166,19 @@ if __name__ == "__main__":
         "pr_auc_lift": round(float(pr_auc(y_test, cal_proba) / base_rate), 2),
         "brier_raw": round(float(brier(y_test, raw_proba)), 4),
         "brier_calibrated": round(float(brier(y_test, cal_proba)), 4),
+        "ece": round(float(ece(y_test, cal_proba)), 4),
         "at_k": [{"k": k,
                   "precision": round(float(precision_at_k(y_test, cal_proba, k)), 4),
+                  "precision_ci": precision_at_k_bootstrap_ci(y_test, cal_proba, k),
+                  "ap_at_k": round(float(average_precision_at_k(y_test, cal_proba, k)), 4),
                   "lift": round(float(precision_at_k(y_test, cal_proba, k) / base_rate), 2),
                   "recall": round(float(recall_at_k(y_test, cal_proba, k)), 4)}
                  for k in (15, 30, 50, 100)],
         "calibration": calibration_table(y_test, cal_proba),
+        "calibration_curve": calibration_curve_data(y_test, cal_proba),
         "feature_importance": [{"feature": n, "importance": round(float(i), 4)}
                                for n, i in sorted(zip(cols, model.feature_importances_),
-                                                  key=lambda x: -x[1])],
+                                                   key=lambda x: -x[1])],
     }
     with open(METRICS_PATH, "w") as f:
         json.dump(metrics, f, indent=2)
