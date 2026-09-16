@@ -298,6 +298,34 @@ def check_clause(clause, facts):
             "review_rating", match.group(0), real,
             f"ratings on file: {sorted(r['rating'] for r in facts['reviews'])}", match.span()))
 
+    # "two 2-star reviews" - how MANY reviews of a rating, which the rating
+    # check above does not cover: it only asks whether one exists.
+    #
+    # Two traps, both of which produced false alarms before being closed:
+    #   - "a 1-star review" has a number touching "star". That is the rating,
+    #     not a count, so the count is refused a digit followed by "star".
+    #   - "one positive review" counts reviews matching an adjective this code
+    #     cannot evaluate. Counting every review instead turns a true sentence
+    #     into a failure, so a count without a rating is not claimed at all -
+    #     it goes to the unchecked-numbers report, where it belongs.
+    for match in re.finditer(
+            r"\b(\d+|" + "|".join(NUMBER_WORDS) + r")\b(?!\s*[-\s]?stars?\b)\s+"
+            r"(\d)\s*[-\s]?star\s+(?:\w+\s+){0,2}?reviews?\b", flat):
+        word, rating = match.group(1), match.group(2)
+        said = int(word) if word.isdigit() else NUMBER_WORDS[word]
+        real = sum(1 for r in facts["reviews"] if r["rating"] == int(rating))
+        claims.append(_claim("review_count", match.group(0).strip(), said == real,
+                             f"{real} review(s) rated {rating} on file", match.span()))
+
+    # "logins remained steady at 7" - a claim about BOTH windows at once.
+    steady = re.search(r"logins?\D{0,30}?(steady|unchanged|flat|the same)\D{0,10}?(\d+)", low)
+    if steady:
+        said = int(steady.group(2))
+        prev, recent = facts["logins"]["prev"], facts["logins"]["recent"]
+        claims.append(_claim(
+            "login_steady", steady.group(0), prev == recent == said,
+            f"database says {prev} -> {recent}", steady.span()))
+
     # What the complaint actually says. "damaged, stale, or leaking" is one
     # disjunctive claim - the agent is listing alternatives, not asserting all.
     topics = [t for t in TOPIC_PATTERNS if t in flat or t.rstrip("ing") in flat]

@@ -1052,3 +1052,42 @@ def test_the_critic_experiment_is_not_wired_into_anything():
                 imported.update(a.name for a in node.names)
         assert not any(m.split(".")[-1] == "critic" for m in imported), \
             f"churn/{name}.py imports the critic experiment"
+
+
+def test_prose_counts_reviews_of_a_rating():
+    from churn.prose_eval import check_prose
+    facts = _prose_facts()                      # exactly one review, rated 1
+    claims = check_prose("Two 1-star reviews report a wrong item.", facts)["claims"]
+    counts = [c for c in claims if c["kind"] == "review_count"]
+    assert counts and counts[0]["ok"] is False   # there is only one
+    ok = check_prose("One 1-star review reports a wrong item.", facts)["claims"]
+    assert [c["ok"] for c in ok if c["kind"] == "review_count"] == [True]
+
+
+def test_prose_does_not_read_a_star_rating_as_a_count():
+    # "a 1-star review" has a number touching "star": that is the rating, and
+    # reading it as a count failed on every true sentence in the last run.
+    from churn.prose_eval import check_prose
+    result = check_prose("A 1-star review reports a wrong item.", _prose_facts())
+    assert [c for c in result["claims"] if not c["ok"]] == []
+    assert not [c for c in result["claims"] if c["kind"] == "review_count"]
+
+
+def test_prose_leaves_adjective_counts_unchecked_rather_than_failing_them():
+    # "one positive review" counts reviews matching a judgement this code
+    # cannot make. Counting all reviews instead would fail a true sentence.
+    from churn.prose_eval import check_prose
+    result = check_prose("Despite one positive review, the refund is unresolved.",
+                         _prose_facts())
+    assert not [c for c in result["claims"] if c["kind"] == "review_count"]
+    assert any("one" in n for n in result["unchecked_numbers"])
+
+
+def test_prose_checks_a_steady_login_claim():
+    from churn.prose_eval import check_prose
+    facts = _prose_facts()                       # logins 0 -> 12
+    bad = check_prose("No disengagement: logins remained steady at 7.", facts)["claims"]
+    assert [c["ok"] for c in bad if c["kind"] == "login_steady"] == [False]
+    facts["logins"] = {"prev": 7, "recent": 7}
+    good = check_prose("No disengagement: logins remained steady at 7.", facts)["claims"]
+    assert [c["ok"] for c in good if c["kind"] == "login_steady"] == [True]
