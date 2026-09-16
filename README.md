@@ -11,6 +11,7 @@ Built to prove a point: **measure everything, including the techniques that fail
 ![XGBoost](https://img.shields.io/badge/XGBoost-calibrated-FF6600)
 ![LangGraph](https://img.shields.io/badge/LangGraph-deepagents-1C3C3C)
 ![FastAPI](https://img.shields.io/badge/FastAPI-service-009688?logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
 ![Azure](https://img.shields.io/badge/Azure_OpenAI-keyless-0078D4?logo=microsoftazure&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 
@@ -95,6 +96,69 @@ assigned from facts re-queried from the database:
           3-star review mentioning slow delivery is above the dissatisfaction
           threshold. No disengagement: logins increased from 3 to 5.
 ```
+
+---
+
+## ChurnGuard — the interface
+
+The pipeline above is the product; this is how a retention team uses it. Six screens over the
+same FastAPI service, server-rendered in Next.js, with **no LLM in the request path** — the
+agent's prose is precomputed, so every page answers in milliseconds.
+
+![ChurnGuard dashboard](docs/img/ui-dashboard.png)
+
+The dashboard opens with what the system has been *measured* to do, because that is the reason
+to trust anything below it: 9.5× better than random at the top of the list, PR-AUC at 5.0× its
+floor, and rings for evidence fidelity and the trajectory rules. Every figure is read from the
+evaluation artefact or recomputed by the reliability checks on the request — if a measurement
+has not been produced, the panel says so and names the command instead of showing a zero.
+
+| Screen | What it answers |
+|---|---|
+| **Overview** | What needs attention right now, and why the shortlist is credible |
+| **Worklist** | Who to act on, in order, with the first row marked *act first* |
+| **Customer 360** | Why this customer, what to do, and whether it pays |
+| **Investigations** | What the agent concluded and every tool call that produced it |
+| **Evaluations** | Model metrics, calibration, and the three agent-reliability checks |
+| **Analytics** | Intervention economics, with every assumption in the open |
+
+### The worklist
+
+![Worklist](docs/img/ui-worklist.png)
+
+Filters, sorting and search over the priced shortlist. The risk level beside each name was
+assigned by `churn/rubric.py` — plain code, from facts re-queried on the request — not by the
+model and not by the LLM.
+
+### Customer 360
+
+![Customer 360](docs/img/ui-customer.png)
+
+The recommendation leads with expected value, and the working that produced it sits beside it:
+cost, margin at risk, break-even probability. When a paid fix does not pay for itself the card
+says what was dropped, what replaced it, and what *would* have justified the original. Evidence
+is marked verified because it was re-queried on this request, independently of anything the
+agent wrote — and the model's SHAP contributions are kept visibly separate from it, because one
+describes the model and the other describes the customer.
+
+### Evaluations
+
+![Evaluations](docs/img/ui-evaluations.png)
+
+The page the project is really about. Nothing here is typed into the frontend: the metrics come
+from `model_metrics.json`, written by the training run, and the three reliability checks are
+recomputed against the database when the page loads.
+
+### Running it
+
+```bash
+uv run uvicorn churn.api:app          # the API on :8000
+cd frontend && npm install && npm run dev   # the UI on :3000
+```
+
+The browser talks to the Next app; the Next app talks to FastAPI. The service address never
+reaches client code. Screenshots in this README are captured from the running pair by
+`frontend/scripts/screenshots.mjs`, so they cannot drift from what the app actually renders.
 
 ---
 
@@ -388,6 +452,13 @@ churn/
 ├── critic.py              #   a measured negative result
 ├── uplift.py / drift.py   #   uplift method check + PSI / KS / prediction drift
 ├── pii.py / memory.py     #   redaction middleware + no re-nagging
+├── reporting.py           #   read-only views the UI reads
+│
+frontend/                  #   ChurnGuard: Next.js 16 + TypeScript + Tailwind
+├── src/app/               #   six routes, server-rendered
+├── src/components/        #   design system + per-screen components
+├── src/lib/api.ts         #   the only module that talks to FastAPI
+└── src/types/api.ts       #   the backend's payloads, typed
 tests/  ·  docs/  ·  scripts/  ·  Dockerfile  ·  .github/
 ```
 
@@ -415,7 +486,8 @@ uv run python -m churn.baselines       # does the ML beat a simple rule?
 uv run python -m churn.archetype_eval  # where does it fail, by customer type?
 uv run python -m churn.outcomes        # hold-out control → measured uplift
 uv run python -m churn.retrain         # is retraining worth it?
-uv run uvicorn churn.api:app --reload  # the service
+uv run uvicorn churn.api:app --reload  # the API
+cd frontend && npm install && npm run dev   # the ChurnGuard interface
 ```
 
 Or with Docker (data + model baked in, no API key for the ML demo):
