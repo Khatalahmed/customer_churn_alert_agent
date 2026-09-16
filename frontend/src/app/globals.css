@@ -268,3 +268,27 @@ body {
   }
   .lift:hover { transform: none; }
 }
+
+/* A gradient numeral, for the one number on a light screen that should read
+   as the headline. Used sparingly: if every figure glows, none of them does. */
+.grad-text {
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* The row a team should act on first. The ring is the emphasis; the left
+   edge carries the brand so the highlight survives a colour-blind reading. */
+.top-pick {
+  position: relative;
+  background: linear-gradient(90deg, var(--accent-soft), transparent 45%);
+}
+
+.top-pick::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent-grad);
+}

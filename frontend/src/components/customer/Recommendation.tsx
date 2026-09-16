@@ -44,37 +44,36 @@ export function Recommendation({ customer }: { customer: CustomerView }) {
         )}
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+      {/* Expected value is the number this card exists to deliver, so it is
+          the only one given the gradient. The three beside it are the working
+          that produced it, and stay quiet. */}
+      <div className="mt-5 flex flex-wrap items-end gap-x-10 gap-y-5">
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-subtle)]">
+          <p className="text-[10.5px] font-extrabold uppercase tracking-[0.18em] text-[var(--text-subtle)]">
             Expected value
           </p>
-          <p className="tnum mt-1 text-[20px] font-semibold">
+          <p className="tnum grad-text mt-1.5 text-[44px] font-black leading-none tracking-tight">
             {moneySigned(customer.expected_value, currency)}
           </p>
         </div>
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-subtle)]">
-            Intervention cost
-          </p>
-          <p className="tnum mt-1 text-[20px] font-semibold">{money(customer.cost, currency)}</p>
-        </div>
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-subtle)]">
-            Margin at risk
-          </p>
-          <p className="tnum mt-1 text-[20px] font-semibold">
-            {money(customer.margin_at_risk, currency)}
-          </p>
-        </div>
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-subtle)]">
-            Break-even P(churn)
-          </p>
-          <p className="tnum mt-1 text-[20px] font-semibold">
-            {percent(customer.break_even_probability)}
-          </p>
-        </div>
+
+        <dl className="grid flex-1 grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
+          {[
+            { label: "Intervention cost", value: money(customer.cost, currency) },
+            { label: "Margin at risk", value: money(customer.margin_at_risk, currency) },
+            {
+              label: "Break-even P(churn)",
+              value: percent(customer.break_even_probability),
+            },
+          ].map((item) => (
+            <div key={item.label}>
+              <dt className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-[var(--text-subtle)]">
+                {item.label}
+              </dt>
+              <dd className="tnum mt-1 text-[19px] font-black tracking-tight">{item.value}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
 
       <p className="mt-3 text-[11.5px] leading-relaxed text-[var(--text-subtle)]">

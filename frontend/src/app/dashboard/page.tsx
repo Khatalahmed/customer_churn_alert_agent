@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, IndianRupee, TrendingUp, Users, Wallet } from "lucide-react";
 
+import { ProofBand } from "@/components/dashboard/ProofBand";
 import { RiskDistribution } from "@/components/dashboard/RiskDistribution";
 import { WorklistTable } from "@/components/worklist/WorklistTable";
 import {
@@ -16,9 +17,13 @@ import { compact, money, moment, percent } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [overview, worklist] = await Promise.all([
+  // The proof band's two sources are cached server-side, so they cost a
+  // request on the first load of an analysis period and nothing after.
+  const [overview, worklist, evaluations, reliability] = await Promise.all([
     attempt(api.overview()),
     attempt(api.worklist()),
+    attempt(api.evaluations()),
+    attempt(api.reliability()),
   ]);
 
   if (isError(overview)) {
@@ -50,6 +55,8 @@ export default async function DashboardPage() {
           <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </PageHeader>
+
+      <ProofBand evaluations={evaluations} reliability={reliability} />
 
       {/* Metric cards — staggered entrance */}
       <div className="metric-stagger grid grid-cols-2 gap-3 lg:grid-cols-5">

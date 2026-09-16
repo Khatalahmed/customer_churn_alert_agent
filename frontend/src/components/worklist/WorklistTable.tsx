@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, Search, SlidersHorizontal } from "lucide-react";
+import { Check, Search, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import { Badge, Empty, RiskBadge, Table, Td, Th } from "@/components/ui/primitives";
 import { cn, money, moneySigned, percent } from "@/lib/format";
@@ -176,10 +176,15 @@ export function WorklistTable({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((customer) => (
+                {rows.map((customer, index) => (
                   <tr
                     key={customer.user_id}
-                    className="group relative transition-colors hover:bg-[var(--surface-2)]"
+                    className={cn(
+                      "group relative transition-colors hover:bg-[var(--surface-2)]",
+                      // The first row under the current sort is the one to act
+                      // on first; saying so is the table's whole job.
+                      index === 0 && !dense && "top-pick",
+                    )}
                   >
                     {/* Left accent bar for HIGH risk rows */}
                     {customer.risk_level === "HIGH" && (
@@ -199,6 +204,12 @@ export function WorklistTable({
                       <div className="tnum text-[11px] text-[var(--text-subtle)]">
                         #{customer.user_id}
                       </div>
+                      {index === 0 && !dense ? (
+                        <span className="mt-1.5 inline-flex whitespace-nowrap items-center gap-1 rounded-full border border-[var(--border-accent)] bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-[var(--accent)]">
+                          <Sparkles className="h-2.5 w-2.5" aria-hidden />
+                          Act first
+                        </span>
+                      ) : null}
                     </Td>
                     <Td>
                       <RiskBadge level={customer.risk_level} />

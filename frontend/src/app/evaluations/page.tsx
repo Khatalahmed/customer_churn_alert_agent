@@ -1,6 +1,7 @@
 import { Check, X } from "lucide-react";
 
 import { CalibrationChart } from "@/components/evaluation/Calibration";
+import { Gauge } from "@/components/ui/Gauge";
 import {
   Badge,
   Card,
@@ -180,7 +181,55 @@ export default async function EvaluationsPage() {
         <NotMeasured reason={reliability.reason} how={reliability.how} />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {/* Three checks, three rings: each has a real ceiling, so a ring
+              says something a bare number does not. */}
+          <section className="brand-band rounded-[var(--radius-card)] shadow-[var(--shadow-lg)]">
+            <div className="relative z-10 flex flex-wrap items-center justify-between gap-x-10 gap-y-8 px-6 py-7 sm:px-8">
+              <div className="min-w-[220px] max-w-sm">
+                <p className="text-[10.5px] font-extrabold uppercase tracking-[0.2em] text-indigo-200">
+                  This run, checked three ways
+                </p>
+                <h3 className="mt-2 text-[20px] font-black leading-tight text-white">
+                  The figures, the sentences,
+                  <br />
+                  and the way it worked
+                </h3>
+                <p className="mt-2.5 text-[11.5px] leading-relaxed text-indigo-200/90">
+                  {reliability.trajectory.errors === 0
+                    ? "No tool call failed during the run."
+                    : `${reliability.trajectory.errors} tool call(s) failed during the run.`}{" "}
+                  Recomputed against the database on this request, not cached from the run.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-start gap-8">
+                <Gauge
+                  value={reliability.evidence.fidelity}
+                  label={percentShort(reliability.evidence.fidelity)}
+                  caption="Evidence"
+                  size={104}
+                />
+                <Gauge
+                  value={reliability.prose.fidelity}
+                  label={percentShort(reliability.prose.fidelity)}
+                  caption="Prose"
+                  size={104}
+                />
+                <Gauge
+                  value={
+                    reliability.trajectory.total
+                      ? reliability.trajectory.passed / reliability.trajectory.total
+                      : 0
+                  }
+                  label={`${reliability.trajectory.passed}/${reliability.trajectory.total}`}
+                  caption="Trajectory"
+                  size={104}
+                />
+              </div>
+            </div>
+          </section>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Metric
               label="Evidence fidelity"
               value={percentShort(reliability.evidence.fidelity)}
@@ -192,14 +241,9 @@ export default async function EvaluationsPage() {
               hint={`${reliability.prose.supported} of ${reliability.prose.claims} claims in the written reasons`}
             />
             <Metric
-              label="Trajectory"
-              value={`${reliability.trajectory.passed} / ${reliability.trajectory.total}`}
-              hint={`rules passed over ${reliability.trajectory.tool_calls} tool calls`}
-            />
-            <Metric
-              label="Failed tool calls"
-              value={reliability.trajectory.errors}
-              hint="errors during the run"
+              label="Tool calls"
+              value={reliability.trajectory.tool_calls}
+              hint={`${reliability.trajectory.errors} failed · ${reliability.customers} customers investigated`}
             />
           </div>
 
