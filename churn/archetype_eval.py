@@ -8,8 +8,8 @@ WHY  : A single AUC hides WHERE the model struggles. Traps only LOOK like
        churners - a vacationer goes quiet, a loyal bulk-buyer orders rarely -
        so they show whether the model mistakes quiet for leaving.
 FLOW : held-out snapshot -> saved model (trained only on earlier snapshots,
-       so this is out-of-time, not in-sample) -> flag if probability >
-       threshold -> group by archetype.
+       so this is out-of-time, not in-sample) -> flag the top N by risk ->
+       group by archetype.
 LOGIC: counts are small (one snapshot, ~220 customers, ~16 churners), so the
        table prints n for every cell - read rates with that in mind.
 """
@@ -20,7 +20,11 @@ import joblib
 from .config import MODEL_PATH, TEST_CUTOFF_DAYS, TRUTH_PATH
 from .features import build_snapshots
 
-THRESHOLD = 0.5
+# Flag = "in the top TOP_N by risk", not "probability > 0.5". Since the model
+# was calibrated its scores are real probabilities of a 1.4% event, so they
+# never approach 0.5 and a fixed threshold flags nobody. A shortlist is what
+# the product actually uses anyway.
+TOP_N = 50
 ORDER = ["cliff_dropper", "gradual_fader", "vacationer", "loyal_bulk_buyer", "regular_active"]
 TRAPS = {"vacationer", "loyal_bulk_buyer"}
 
@@ -29,7 +33,8 @@ def main():
     test, _ = build_snapshots([TEST_CUTOFF_DAYS])
     bundle = joblib.load(MODEL_PATH)
     test["proba"] = bundle["model"].predict_proba(test[bundle["features"]])[:, 1]
-    test["flagged"] = test["proba"] > THRESHOLD
+    flagged_ids = set(test.nlargest(TOP_N, "proba")["user_id"])
+    test["flagged"] = test["user_id"].isin(flagged_ids)
     top15 = set(test.nlargest(15, "proba")["user_id"])
 
     with open(TRUTH_PATH) as f:
@@ -38,7 +43,7 @@ def main():
 
     print("=" * 84)
     print(f"PER-ARCHETYPE PERFORMANCE  (out-of-time snapshot {test['as_of'].iloc[0]}, "
-          f"flag if prob > {THRESHOLD})")
+          f"flag = top {TOP_N} of {len(test)} by risk)")
     print("=" * 84)
     print(f"{'archetype':<25}{'active':>7}{'churn':>7}{'recall':>12}{'false alarms':>16}{'in top-15':>11}")
     print("-" * 84)

@@ -226,6 +226,30 @@ Recency features stopped being leakage and became real signals — but cliff-dro
 
 ---
 
+## STAGE 15 - Six improvements, and the bugs they uncovered
+
+A deliberate pass over the weakest parts, each one measured before and after.
+
+**1. PR-AUC and calibration.** At a 1.4% churn rate ROC-AUC says 0.84 and calls XGBoost and logistic regression identical; PR-AUC says 0.069 against a 0.014 floor and separates them (0.087 vs 0.071). The raw scores were not probabilities either - class weighting pushed the top of the list to ~0.9 for a 1.4% event. Platt scaling: Brier 0.102 -> 0.0135, ranking untouched.
+
+**2. Code decides, the LLM explains.** The agent's verdicts added nothing to precision (0.14 vs the shortlist's 0.13), and it was applying a fixed rule anyway. The rule moved to `rubric.py`; a live run then reproduced the LLM's verdicts customer for customer. `risk_level` was removed from the agent's output schema entirely, with a test to enforce it.
+
+**3. A specific intervention, priced.** `actions.py` matches the fix to the complaint and computes expected value. The answer is uncomfortable and was kept: no paid intervention pays for itself on this shortlist - a coupon needs Rs 7,143 of margin at risk at 14% churn, and nobody has it. The plan downgrades to a Rs 5 email and reports the break-even that would justify the real fix.
+
+**4. Trajectory evals.** `trace.py` records every tool call; `trace_eval.py` grades nine rules over it. The rules are unit-tested against hand-built broken traces (skipped review check, stray customer, tool loop), so CI covers them without an API key. A real run scores 9/9 with 31 calls for 15 customers.
+
+**5. Scheduled scan and a service.** `pipeline.py` (score, price, write worklist, check drift, exit 2 on alert) and `api.py` (four endpoints, no LLM in the path). The first drift baseline compared today against all training snapshots pooled and flagged `total_orders` every day, because customers accumulate orders over time; the baseline is now the most recent snapshot.
+
+**6. The learning loop.** `outcomes.py` holds back a seeded random 30% control so uplift is measurable, and reports -9%, INCONCLUSIVE, plus the number that would settle it: ~9,500 customers per arm. `retrain.py` backtests refreshing vs staying stale (PR-AUC 0.089 vs 0.072) and promotes accordingly.
+
+**Two bugs this pass caught in its own work:**
+- `promote()` first retrained on every snapshot INCLUDING the held-out test one and saved over `churn_model.pkl` - which would have turned every reported metric in-sample. Promotion now writes a separate production model flagged `evaluation_safe=False`, with a test asserting the evaluated model is never overwritten.
+- After calibration, `archetype_eval` flagged nobody: it used "probability > 0.5", and calibrated scores for a 1.4% event never get close. It now flags the top 50 by risk, which is what the product does anyway.
+
+**Lesson:** *Every improvement moved a number, and three of them moved it DOWN once measured honestly. The ones worth keeping were the ones that survived a comparison, not the ones that sounded good.*
+
+---
+
 ## The whole project in one line
 
 > An **XGBoost model** ranks customers by *churn risk*; a **deep agent** with

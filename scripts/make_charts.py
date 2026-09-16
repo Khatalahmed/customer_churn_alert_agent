@@ -31,7 +31,8 @@ plt.rcParams.update({
 # 1. XGBoost feature importance
 # --------------------------------------------------------------------------- #
 bundle = joblib.load("churn_model.pkl")
-model, cols = bundle["model"], bundle["features"]
+# the saved "model" is a calibrated wrapper; importances live on the raw booster
+model, cols = bundle.get("tree_model", bundle["model"]), bundle["features"]
 pairs = sorted(zip(cols, model.feature_importances_), key=lambda x: x[1])
 names = [c.replace("_", " ") for c, _ in pairs]
 vals = [float(v) for _, v in pairs]
