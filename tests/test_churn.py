@@ -885,3 +885,42 @@ def test_login_windows_do_not_double_count_the_boundary(tmp_path):
     conn.close()
     assert prev + recent == 1, "one login must land in exactly one window"
     assert recent == 1, "the boundary belongs to the recent, half-open window"
+
+
+def test_a_save_is_discounted_not_a_flat_multiple():
+    from churn.actions import margin_present_value
+    # with no churn and no discount it IS just months x margin
+    assert round(margin_present_value(100, survival=1.0, discount=0.0, horizon=6), 2) == 600.0
+    # a customer who might leave again is worth less
+    assert margin_present_value(100, survival=0.9) < margin_present_value(100, survival=0.99)
+    # and future money is worth less than money now
+    assert margin_present_value(100, discount=0.05) < margin_present_value(100, discount=0.0)
+    # the horizon cannot make it grow without limit: it converges on the
+    # geometric sum m*f/(1-f), so each extra year is worth less than the last
+    f = 0.93 / 1.01
+    assert margin_present_value(100, horizon=600) == pytest.approx(100 * f / (1 - f), rel=1e-3)
+    first = margin_present_value(100, horizon=24) - margin_present_value(100, horizon=12)
+    later = margin_present_value(100, horizon=36) - margin_present_value(100, horizon=24)
+    assert later < first
+
+
+def test_expected_value_reports_how_wrong_it_could_be():
+    from churn.actions import UPLIFT_UNCERTAINTY, expected_value
+    v = expected_value(0.14, 500, 2.0, "email_nudge")
+    low, high = v["value_range"]
+    assert low < v["expected_value"] < high
+    assert v["robust"] is (low > 0)
+    # a knife-edge case must not be called robust
+    spec = expected_value(0.14, 500, 2.0, "coupon")
+    assert spec["robust"] is False
+
+
+def test_break_even_probability_is_the_point_where_it_pays():
+    from churn.actions import break_even_probability, expected_value
+    margin = expected_value(0.1, 500, 2.0, "coupon")["margin_at_risk"]
+    p = break_even_probability(margin, "coupon")
+    at_break_even = expected_value(p, 500, 2.0, "coupon")
+    assert abs(at_break_even["expected_value"]) < 0.01     # exactly zero value
+    assert expected_value(p * 1.1, 500, 2.0, "coupon")["worth_doing"]
+    assert not expected_value(p * 0.9, 500, 2.0, "coupon")["worth_doing"]
+    assert break_even_probability(0, "coupon") == float("inf")

@@ -9,7 +9,7 @@ WHY   : "HIGH risk - retention call" does not tell a team what to do or
        Rs 200 of monthly margin is worth less attention than a 9% customer
        worth Rs 900, and an unresolved refund needs the refund fixed, not a
        coupon on top of it.
-LOGIC: expected value = P(churn) x margin at risk x uplift - cost.
+LOGIC: expected value = P(churn) x present value of the margin x uplift - cost.
        P(churn) is calibrated (see train_model), so it can be multiplied by
        money honestly. EVERYTHING ELSE BELOW IS AN ASSUMPTION: margin rate,
        how many months of margin a save is worth, each intervention's uplift
@@ -22,8 +22,21 @@ from .rubric import SERIOUS_CATEGORIES
 
 # --- assumptions (replace with real finance numbers before believing any of it) ---
 MARGIN_RATE = 0.25          # gross margin on an order
-MONTHS_SAVED = 6            # how long a rescued customer keeps ordering
 CURRENCY = "Rs"
+
+# A rescued customer is not worth six months of margin in cash today, which is
+# what "MONTHS_SAVED = 6" quietly assumed. Two things reduce it:
+#   - they may leave anyway next month, or the month after (MONTHLY_SURVIVAL)
+#   - a rupee in six months is worth less than a rupee now (MONTHLY_DISCOUNT)
+# So the value of a save is the present value of a margin stream that decays,
+# summed over a horizon, instead of a flat multiple.
+MONTHLY_SURVIVAL = 0.93     # a rescued customer's chance of still being here next month
+MONTHLY_DISCOUNT = 0.01     # ~12.7% a year
+VALUE_HORIZON_MONTHS = 12   # beyond this the discounted terms are rounding error
+
+# How wrong the assumptions could be, for the sensitivity band. An expected
+# value of Rs 10 built on an uplift nobody has measured is not a decision.
+UPLIFT_UNCERTAINTY = 0.5    # the true uplift could be half, or one and a half times
 
 # uplift = the share of would-be churners this intervention actually rescues.
 # Ordered by how specific the fix is: fixing the actual complaint beats a coupon.
@@ -75,21 +88,62 @@ def monthly_margin(avg_order_value: float, orders_per_month: float) -> float:
     return (avg_order_value or 0.0) * (orders_per_month or 0.0) * MARGIN_RATE
 
 
+def margin_present_value(monthly: float, survival: float = MONTHLY_SURVIVAL,
+                         discount: float = MONTHLY_DISCOUNT,
+                         horizon: int = VALUE_HORIZON_MONTHS) -> float:
+    """Present value of a monthly margin stream that decays and is discounted.
+
+    sum over k of  monthly * survival^k / (1 + discount)^k
+
+    A save is worth less than "six months of margin": the customer can leave
+    again, and future money is worth less than money now. At the defaults this
+    is ~7.0 months of margin over a 12-month horizon rather than a flat 6 -
+    close by coincidence, but it now moves correctly when the assumptions do,
+    and it stops pretending a rescue is permanent.
+    """
+    factor = survival / (1 + discount)
+    return sum(monthly * factor ** k for k in range(1, horizon + 1))
+
+
 def expected_value(churn_probability: float, avg_order_value: float,
                    orders_per_month: float, intervention: str) -> dict:
-    """Money at risk, and whether acting on it pays for itself."""
+    """Money at risk, whether acting pays for itself, and how sure that is.
+
+    expected save = P(churn) x present value of the margin x uplift
+    The cost is paid for EVERY customer contacted, including the ones who were
+    never going to leave - which is why a cheap intervention wins here.
+    """
     spec = INTERVENTIONS[intervention]
-    margin_at_risk = monthly_margin(avg_order_value, orders_per_month) * MONTHS_SAVED
+    margin_at_risk = margin_present_value(monthly_margin(avg_order_value, orders_per_month))
     expected_save = churn_probability * margin_at_risk * spec["uplift"]
+    value = expected_save - spec["cost"]
+    # the same sum with the uplift assumption at its pessimistic and optimistic ends
+    low = churn_probability * margin_at_risk * spec["uplift"] * (1 - UPLIFT_UNCERTAINTY) - spec["cost"]
+    high = churn_probability * margin_at_risk * spec["uplift"] * (1 + UPLIFT_UNCERTAINTY) - spec["cost"]
     return {
         "intervention": intervention,
         "intervention_label": spec["label"],
         "margin_at_risk": round(margin_at_risk, 2),
         "cost": spec["cost"],
         "expected_save": round(expected_save, 2),
-        "expected_value": round(expected_save - spec["cost"], 2),
+        "expected_value": round(value, 2),
+        "value_range": (round(low, 2), round(high, 2)),
+        "robust": low > 0,          # still pays if the uplift is half what we assume
         "worth_doing": expected_save > spec["cost"],
     }
+
+
+def break_even_probability(margin_at_risk: float, intervention: str) -> float:
+    """How likely churn must be before this intervention pays for itself.
+
+    The mirror of break_even_margin: with the customer's value fixed, this is
+    the probability that makes the sum work. Printing both turns "not worth
+    it" into two specific numbers that would change the answer.
+    """
+    spec = INTERVENTIONS[intervention]
+    if margin_at_risk <= 0 or spec["uplift"] <= 0:
+        return float("inf")
+    return spec["cost"] / (margin_at_risk * spec["uplift"])
 
 
 def break_even_margin(churn_probability: float, intervention: str) -> float:
@@ -126,6 +180,8 @@ def plan(verdict: dict, churn_probability: float, avg_order_value: float,
     # downgrade, this is the number that would justify the real fix
     result["break_even_margin"] = round(
         break_even_margin(churn_probability, intervention), 2)
+    result["break_even_probability"] = round(
+        break_even_probability(result["margin_at_risk"], intervention), 4)
     return result
 
 
