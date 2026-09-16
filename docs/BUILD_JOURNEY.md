@@ -185,6 +185,20 @@ Recency features stopped being leakage and became real signals — but cliff-dro
 
 ---
 
+## STAGE 13 - Baselines: does the model earn its place?
+
+**What:** `baselines.py` scores the same held-out snapshot with the obvious alternatives - picking at random, "days since last order", "logins fell", and logistic regression - then repeats the whole comparison at every cutoff (walk-forward).
+
+**Result on the last snapshot:** XGBoost AUC 0.71 vs logistic regression 0.64; but logistic regression wins precision@15 (0.33 vs 0.27). The "no orders in 14 days" flag picks 29 customers, gets 3 right (precision 0.10).
+
+**Result across all three cutoffs:** mean precision@15 - XGBoost 0.16, login-drop rule 0.16, logistic regression 0.13, dormancy 0.09. Mean AUC - XGBoost 0.60, logistic regression 0.60.
+
+**Honest conclusion:** on 38 training churn events the gradient boosting is level with a linear model and with a two-line rule; it only pulls ahead on the snapshot with the most training data.
+
+**Lesson:** *Always measure the boring baseline. "We used XGBoost" is a choice, not a result - and on small data the simple model is often just as good.*
+
+---
+
 ## The whole project in one line
 
 > An **XGBoost model** ranks customers by *risk × value*; a **deep agent** with

@@ -152,6 +152,38 @@ Real early warning is clearly better than random — but only 3–4 of the 15 hi
 customers actually churn. A test guarantees the setup: deleting every row dated after the
 cutoff changes **no** feature value, and each churn event is labelled exactly once.
 
+### Does the ML actually beat a simple rule?
+
+"We used XGBoost" is not a result. `churn.baselines` scores the same held-out snapshot with
+the things a team would try first:
+
+| Method | AUC | Precision@15 | Recall@15 | Lift |
+|---|---|---|---|---|
+| pick at random | 0.50 | 0.07 | 0.07 | 1.0x |
+| dormancy rule (days since last order) | 0.58 | 0.07 | 0.06 | 0.9x |
+| login drop (prev 14d − last 14d) | 0.57 | 0.20 | 0.19 | 2.8x |
+| logistic regression | 0.64 | **0.33** | 0.31 | 4.6x |
+| XGBoost (this project) | **0.71** | 0.27 | 0.25 | 3.7x |
+
+The classic **"no orders in 14 days" flag** picks 29 customers and gets 3 right — precision
+0.10, barely above random.
+
+**But one snapshot has 16 churners, so one customer moves precision@15 by 7 points.** Repeating
+the comparison at every cutoff (train on everything earlier) is less flattering:
+
+| Method | mean precision@15 | mean AUC |
+|---|---|---|
+| XGBoost | 0.16 | 0.60 |
+| login drop rule | 0.16 | 0.54 |
+| logistic regression | 0.13 | 0.60 |
+| dormancy rule | 0.09 | 0.53 |
+
+**Honest conclusion:** XGBoost is level with logistic regression and, at the top of the
+ranking, level with a two-line login rule. It pulls ahead only on the last snapshot, the one
+with the most training data (precision 0.27 vs 0.20, AUC 0.71 vs 0.57) — consistent with a
+model that is data-hungry and currently data-starved. On 38 training churn events, the
+gradient boosting is not yet earning its complexity.
+
 ### Per archetype (held-out snapshot)
 
 The simulator plants five customer types: two really churn, two are **traps** that only
@@ -228,6 +260,7 @@ churn/                     # source package
 ├── eval.py / verifier.py  #   precision-recall + evidence fact-checking
 ├── explain.py             #   SHAP
 ├── archetype_eval.py      #   per-type recall + trap false-alarms
+├── baselines.py           #   rules vs logistic regression vs XGBoost
 ├── critic.py              #   the measured negative result
 ├── uplift.py / drift.py   #   hold-out uplift + PSI drift
 ├── pii.py / memory.py     #   redaction middleware + no re-nagging
@@ -254,6 +287,7 @@ uv run python -m churn.main                    # 3. run the agent
 uv run python -m churn.eval                    # precision / recall
 uv run python -m churn.verifier                # evidence fidelity
 uv run python -m churn.archetype_eval          # per-archetype performance
+uv run python -m churn.baselines               # rules vs logistic regression vs XGBoost
 uv run python -m churn.report                  # retention worklist
 ```
 

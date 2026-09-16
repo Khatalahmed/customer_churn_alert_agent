@@ -139,6 +139,18 @@ def test_azure_provider_is_keyless_and_configured_from_env(monkeypatch):
         get_model()
 
 
+def test_baseline_evaluate_scores_a_perfect_ranking():
+    from churn.baselines import evaluate
+    y = np.array([1, 1] + [0] * 8)                  # base rate 0.2
+    perfect = np.array([9, 8] + [1] * 8)
+    r = evaluate(y, perfect, k=2)
+    assert r["auc"] == 1.0
+    assert r["precision@2"] == 1.0 and r["recall@2"] == 1.0
+    assert r["lift"] == 5.0                         # 1.0 / 0.2
+    worst = np.array([1, 1] + [9] * 8)
+    assert evaluate(y, worst, k=2)["precision@2"] == 0.0
+
+
 def test_psi_stable_is_near_zero():
     x = pd.Series(np.random.RandomState(0).normal(size=500))
     assert psi(x, x) < 0.01
@@ -177,7 +189,7 @@ def _pred(uid, risk, evidence=None, action="coupon", prob=0.5):
 def test_modules_import_without_side_effects():
     # importing must not run the pipeline, need an API key, or need output files
     import importlib
-    for name in ["eval", "verifier", "critic", "report", "uplift",
+    for name in ["eval", "verifier", "critic", "report", "uplift", "baselines",
                  "mark_contacted", "archetype_eval", "train_model", "main"]:
         importlib.import_module(f"churn.{name}")
 
