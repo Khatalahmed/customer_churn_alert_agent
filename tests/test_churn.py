@@ -219,6 +219,62 @@ def test_rubric_verdicts_do_not_drift():
         assert assess(facts)["risk_level"] == expected, label
 
 
+def test_api_serves_health_worklist_and_one_customer(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import churn.memory as memory
+    from churn.api import app
+    monkeypatch.setattr(memory, "STORE_PATH", tmp_path / "contacted.json")
+    client = TestClient(app)
+
+    health = client.get("/health").json()
+    assert health["status"] == "ok" and health["active_customers"] > 0
+    assert health["analysis_time"] == health["analysis_time"]
+
+    work = client.get("/worklist", params={"top_n": 5}).json()
+    assert len(work["customers"]) == 5
+    values = [c["expected_value"] for c in work["customers"]]
+    assert values == sorted(values, reverse=True)       # most valuable first
+    first = work["customers"][0]
+    assert first["risk_level"] in ("HIGH", "MEDIUM", "LOW")
+    assert 0 <= first["churn_probability"] <= 1
+    assert "intervention_label" in first and "evidence" in first
+
+    # one customer, with the reason a CRM would show
+    detail = client.get(f"/customers/{first['user_id']}").json()
+    assert detail["user_id"] == first["user_id"]
+    assert detail["evidence"]["logins_recent_30d"] >= 0
+
+    # a customer who is not active gets a 404 that explains itself
+    missing = client.get("/customers/999999")
+    assert missing.status_code == 404
+    assert "not an active customer" in missing.json()["detail"]
+
+
+def test_api_records_outreach(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import churn.memory as memory
+    from churn.api import app
+    monkeypatch.setattr(memory, "STORE_PATH", tmp_path / "contacted.json")
+    client = TestClient(app)
+    assert client.post("/contacted", json={"user_ids": [1, 2, 3]}).json()["marked"] == 3
+    assert memory.recently_contacted_ids() == {1, 2, 3}
+
+
+def test_pipeline_builds_a_priced_worklist(tmp_path, monkeypatch):
+    import churn.memory as memory
+    from churn.pipeline import build_worklist
+    monkeypatch.setattr(memory, "STORE_PATH", tmp_path / "contacted.json")
+    work = build_worklist(top_n=5)
+    assert len(work["customers"]) == 5
+    assert work["scored"] > 100
+    assert all("expected_value" in c for c in work["customers"])
+    # the summary adds up
+    worth = [c for c in work["customers"] if c["worth_doing"]]
+    assert work["worth_doing"] == len(worth)
+    assert work["expected_value_total"] == pytest.approx(
+        round(sum(c["expected_value"] for c in worth), 2))
+
+
 def test_intervention_matches_the_problem():
     from churn.actions import choose_intervention
     unhappy = {"risk_level": "HIGH", "dissatisfaction": True, "disengagement": True}
