@@ -924,3 +924,48 @@ def test_break_even_probability_is_the_point_where_it_pays():
     assert expected_value(p * 1.1, 500, 2.0, "coupon")["worth_doing"]
     assert not expected_value(p * 0.9, 500, 2.0, "coupon")["worth_doing"]
     assert break_even_probability(0, "coupon") == float("inf")
+
+
+def test_ks_catches_a_shift_psi_can_miss():
+    # A feature that is 0 for most customers puts nearly everyone in one bin,
+    # so PSI barely moves when the zeros start becoming small positives.
+    # KS compares the distributions directly and sees it.
+    from churn.drift import ks_critical_value, ks_statistic, psi
+    rng = np.random.default_rng(0)
+    baseline = pd.Series(np.where(rng.random(2000) < 0.9, 0.0, rng.random(2000)))
+    shifted = pd.Series(np.where(rng.random(2000) < 0.9, 0.02, rng.random(2000)))
+    assert psi(baseline, shifted) < 0.2, "this is the case PSI under-reacts to"
+    assert ks_statistic(baseline, shifted) > ks_critical_value(2000, 2000)
+
+
+def test_ks_critical_value_scales_with_sample_size():
+    from churn.drift import ks_critical_value
+    assert ks_critical_value(100, 100) > ks_critical_value(10000, 10000)
+    assert ks_critical_value(0, 10) == float("inf")
+    with pytest.raises(ValueError):
+        ks_critical_value(100, 100, alpha=0.2)
+
+
+def test_drift_does_not_alert_on_significant_but_tiny_shifts():
+    # With thousands of customers per side, the KS critical value is ~0.03,
+    # so a cohort ageing by a couple of orders is "significant" and useless.
+    from churn.drift import feature_drift
+    rng = np.random.default_rng(1)
+    base = pd.DataFrame({"total_orders": rng.poisson(8, 3000)})
+    nudged = pd.DataFrame({"total_orders": rng.poisson(8.3, 3000)})
+    row = feature_drift(base, nudged, ["total_orders"])[0]
+    assert row["ks_significant"], "the shift is real"
+    assert not row["ks_material"], "but it is too small to page anyone about"
+    assert row["severity"] == "watch"
+
+    real = pd.DataFrame({"total_orders": rng.poisson(16, 3000)})
+    assert feature_drift(base, real, ["total_orders"])[0]["severity"] == "alert"
+
+
+def test_prediction_drift_sees_what_features_can_hide():
+    from churn.drift import prediction_drift
+    rng = np.random.default_rng(2)
+    quiet = prediction_drift(rng.random(500) * 0.02, rng.random(500) * 0.02)
+    assert quiet["severity"] == "stable"
+    moved = prediction_drift(rng.random(500) * 0.02, rng.random(500) * 0.2)
+    assert moved["severity"] == "alert" and moved["mean_ratio"] > 5

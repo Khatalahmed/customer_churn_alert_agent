@@ -17,10 +17,12 @@ NOTE  : no LLM here. This is the cheap, deterministic path that can run every
 import json
 import sys
 
+import joblib
+
 from .actions import CURRENCY, customer_money, open_complaint_categories, plan
-from .config import (TRAIN_CUTOFFS_DAYS, WORKLIST_PATH, analysis_time,
+from .config import (MODEL_PATH, TRAIN_CUTOFFS_DAYS, WORKLIST_PATH, analysis_time,
                      connect_readonly, reference_now)
-from .drift import psi
+from .drift import feature_drift, prediction_drift
 from .features import build_features, build_snapshots
 from .memory import recently_contacted_ids
 from .rubric import assess
@@ -63,19 +65,41 @@ def build_worklist(top_n: int = 15) -> dict:
 
 
 def drift_alerts(threshold: float = DRIFT_THRESHOLD) -> list[str]:
-    """Compare today's feature distributions with the model's training data.
+    """Compare today's inputs AND today's scores with the model's training data.
 
     The baseline is the MOST RECENT training snapshot, not all of them pooled:
     customers accumulate orders as time passes, so comparing today against
     months-old snapshots flags that growth as drift every single day.
+
+    Three ways of noticing, because one is not enough:
+      - PSI per feature, which is blind to a shift inside a crowded bin;
+      - a two-sample KS test per feature, judged against its own critical
+        value at this sample size, which catches those;
+      - drift in the model's OUTPUT, which can move while every input looks
+        fine - and the output is what the worklist is actually built from.
     """
     train, cols = build_snapshots([min(TRAIN_CUTOFFS_DAYS)])
     today, _ = build_features()
     alerts = []
-    for col in cols:
-        value = psi(train[col], today[col])
-        if value > threshold:
-            alerts.append(f"{col} drifted (PSI {value:.2f} > {threshold}) - retrain")
+
+    for row in feature_drift(train, today, cols, psi_alert=threshold):
+        if row["severity"] != "alert":
+            continue
+        why = (f"PSI {row['psi']} > {threshold}" if row["psi"] > threshold
+               else f"KS {row['ks']} - real (critical {row['ks_critical']}) "
+                    f"and big enough to act on")
+        alerts.append(f"{row['feature']} drifted ({why}) - retrain")
+
+    bundle = joblib.load(MODEL_PATH)
+    model, features = bundle["model"], bundle["features"]
+    scores = prediction_drift(model.predict_proba(train[features])[:, 1],
+                              model.predict_proba(today[features])[:, 1],
+                              psi_alert=threshold)
+    if scores["severity"] == "alert":
+        alerts.append(
+            f"the score distribution drifted (PSI {scores['psi']} > {threshold}, "
+            f"mean risk {scores['baseline_mean']} -> {scores['new_mean']}) - "
+            f"the shortlist does not mean what it used to")
     return alerts
 
 
