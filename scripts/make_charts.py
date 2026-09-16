@@ -36,9 +36,9 @@ pairs = sorted(zip(cols, model.feature_importances_), key=lambda x: x[1])
 names = [c.replace("_", " ") for c, _ in pairs]
 vals = [float(v) for _, v in pairs]
 
-fig, ax = plt.subplots(figsize=(7.4, 3.6))
+fig, ax = plt.subplots(figsize=(7.4, 4.2))
 ax.barh(names, vals, color="#4f46e5")
-ax.set_title("What the churn model relies on  (XGBoost, leakage-safe features)",
+ax.set_title("What the churn model relies on  (point-in-time features)",
              fontweight="bold", loc="left")
 ax.set_xlabel("feature importance")
 for s in ("top", "right"):
@@ -48,34 +48,39 @@ fig.savefig("docs/img/feature_importance.png", dpi=140, bbox_inches="tight")
 plt.close(fig)
 
 # --------------------------------------------------------------------------- #
-# 2. Per-archetype: recall (churners) vs false-alarm (traps)
-#    Out-of-fold values (5-fold CV, mean over 10 fold seeds) from
-#    churn.archetype_eval - NOT the in-sample numbers of the saved model.
-#    Exact for the frozen-reference-time dataset (reproducible).
+# 2. Precision of the top 15 vs picking at random (held-out snapshot)
+#    Values from churn.train_model / the precision@k check and churn.eval.
+#    AGENT_PRECISION is from a live LLM run (None = not measured -> bar omitted).
 # --------------------------------------------------------------------------- #
-labels = ["cliff-dropper\n(churner)", "gradual-fader\n(churner)",
-          "vacationer\n(trap)", "loyal buyer\n(trap)", "regular\nactive"]
-rates = [39, 55, 30, 45, 15]
-colors = ["#16a34a", "#16a34a", "#dc2626", "#dc2626", "#94a3b8"]
+BASE_RATE = 0.073
+AGENT_PRECISION = 0.20
+
+bars_spec = [
+    ("pick at\nrandom", BASE_RATE, "#94a3b8"),
+    ("ML shortlist\n(risk x value)", 0.20, "#4f46e5"),
+    ("ML top 15\n(by probability)", 0.27, "#4f46e5"),
+]
+if AGENT_PRECISION is not None:
+    bars_spec.append(("agent verdicts\n(HIGH + MEDIUM)", AGENT_PRECISION, "#16a34a"))
 
 fig, ax = plt.subplots(figsize=(7.4, 3.8))
-bars = ax.bar(labels, rates, color=colors, width=0.62)
-ax.set_ylabel("% flagged by the model")
+labels = [b[0] for b in bars_spec]
+values = [b[1] * 100 for b in bars_spec]
+bars = ax.bar(labels, values, color=[b[2] for b in bars_spec], width=0.6)
+ax.set_ylabel("% that really churned")
 ax.set_ylim(0, 100)
-ax.set_title("Per-archetype flag rate  (out-of-fold, threshold 0.5)",
+ax.set_title("Who actually churns in the next 14 days?  (held-out snapshot)",
              fontweight="bold", loc="left")
-for b, r in zip(bars, rates):
-    ax.text(b.get_x() + b.get_width() / 2, r + 2, f"{r}%",
+for b, v in zip(bars, values):
+    ax.text(b.get_x() + b.get_width() / 2, v + 2, f"{v:.0f}%",
             ha="center", fontweight="bold", fontsize=10)
-ax.axhline(50, color="#e5e7eb", lw=1, zorder=0)
 for s in ("top", "right"):
     ax.spines[s].set_visible(False)
 fig.text(0.01, -0.02,
-         "green = recall on real churners   •   red = false-alarm on look-alike traps   "
-         "•   grey = false-alarm on regular customers",
+         "220 active customers, 16 churn in the next 14 days  •  model never saw this snapshot",
          fontsize=9, color="#6b7280")
 fig.tight_layout()
-fig.savefig("docs/img/archetype_recall.png", dpi=140, bbox_inches="tight")
+fig.savefig("docs/img/precision_at_15.png", dpi=140, bbox_inches="tight")
 plt.close(fig)
 
-print("Wrote docs/img/feature_importance.png and docs/img/archetype_recall.png")
+print("Wrote docs/img/feature_importance.png and docs/img/precision_at_15.png")

@@ -2,20 +2,30 @@
 eval.py
 
 WHAT : This script grades the agent. It compares the agent's predictions
-       with the answer key, then prints precision, recall, and F1 score.
+       with what actually happened in the 14 days after the analysis time,
+       then prints precision, recall, and F1 score.
 WHY  : "It looks like it works" is not proof. Numbers are proof. Because
        we planted the churned customers ourselves, we know the true answer,
        so we can measure the agent honestly.
-FLOW : load the answer key (who really churned) -> load the predictions
-       (who the agent flagged) -> compare the two sets -> print the score
-       and the mistakes.
+FLOW : customers active at the analysis time -> label who churns in the next
+       14 days (answer key) -> load the predictions (who the agent flagged)
+       -> compare the two sets -> print the score and the mistakes.
 LOGIC: We treat HIGH or MEDIUM risk as "flagged as churn". LOW means safe.
        precision = of the ones we flagged, how many really churned.
        recall    = of the ones who really churned, how many we caught.
 """
 import json
 
-from .config import PREDICTIONS_PATH, TRUTH_PATH
+from .config import HORIZON_DAYS, PREDICTIONS_PATH
+from .features import add_labels, build_features
+
+
+def future_churners(as_of=None) -> set:
+    """Customers active at `as_of` who stop being active within the horizon."""
+    df, _ = build_features(as_of=as_of)
+    df = add_labels(df)
+    return set(df.loc[df["churned"] == 1, "user_id"])
+
 
 def score(predictions: list[dict], truly_churned: set) -> dict:
     """Compare flagged customers (HIGH/MEDIUM) with the truly churned set."""
@@ -44,10 +54,11 @@ def score(predictions: list[dict], truly_churned: set) -> dict:
 
 
 def main():
-    # --- 1. Load the answer key: which customers truly churned ---
-    with open(TRUTH_PATH) as f:
-        truth = json.load(f)
-    truly_churned = {row["user_id"] for row in truth if row["churned"]}
+    # --- 1. The answer key: who churned in the horizon after the analysis time ---
+    df, _ = build_features()
+    as_of = df["as_of"].iloc[0]
+    labelled = add_labels(df)          # drops customers who had already churned
+    truly_churned = set(labelled.loc[labelled["churned"] == 1, "user_id"])
 
     # --- 2. Load the agent's predictions ---
     with open(PREDICTIONS_PATH) as f:
@@ -60,7 +71,10 @@ def main():
     print("=" * 60)
     print("CHURN AGENT EVALUATION")
     print("=" * 60)
-    print(f"Truly churned (ground truth): {sorted(truly_churned)}")
+    print(f"Analysis time: {as_of}  |  scored: {len(df)} active customers, "
+          f"{len(labelled)} with a known 14-day outcome "
+          f"({len(df) - len(labelled)} had already churned before the cutoff)")
+    print(f"Churned in the next {HORIZON_DAYS} days (ground truth): {sorted(truly_churned)}")
     print(f"Flagged by agent (HIGH/MED):  {sorted(s['flagged'])}")
     print("-" * 60)
     print(f"True positives  (caught):      {sorted(s['true_positives'])}  = {len(s['true_positives'])}")

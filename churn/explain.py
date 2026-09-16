@@ -29,6 +29,11 @@ FRIENDLY = {
     "unresolved_ticket_rate": "unresolved support tickets",
     "tickets_per_order": "frequent complaints",
     "avg_order_value": "order value pattern",
+    "logins_last_14d": "few recent logins",
+    "logins_prev_14_28d": "earlier login pattern",
+    "days_since_last_login": "long time since last login",
+    "orders_last_28d": "few recent orders",
+    "days_since_last_order": "long time since last order",
 }
 
 

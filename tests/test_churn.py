@@ -21,10 +21,58 @@ from churn.drift import psi
 def test_features_shape():
     df, cols = build_features()
     assert cols == FEATURE_COLS
-    assert len(df) == 300
+    assert 0 < len(df) < 300                     # only customers active at the analysis time
+    assert df["user_id"].is_unique
     assert "churned" not in df.columns          # scoring must not need the answer key
-    df = add_labels(df)
-    assert df["churned"].isin([0, 1]).all()
+    labelled = add_labels(df)
+    assert labelled["churned"].isin([0, 1]).all()
+    assert len(labelled) <= len(df)             # already-churned customers are dropped
+
+
+def test_features_ignore_everything_after_the_cutoff(tmp_path):
+    # point-in-time guarantee: deleting all data from after the cutoff must not
+    # change a single feature value
+    import shutil
+    import sqlite3
+    from churn.config import DB_PATH, analysis_time, connect_readonly
+    conn = connect_readonly()
+    as_of = analysis_time(conn)
+    conn.close()
+    past = tmp_path / "past.db"
+    shutil.copy(DB_PATH, past)
+    c = sqlite3.connect(past)
+    c.execute("DELETE FROM auth_audit_log WHERE event_timestamp >= ?", (as_of,))
+    c.execute("DELETE FROM orders WHERE placed_at >= ?", (as_of,))
+    c.execute("DELETE FROM support_tickets WHERE created_at >= ?", (as_of,))
+    c.execute("DELETE FROM reviews WHERE created_at >= ?", (as_of,))
+    # a ticket resolved after the cutoff was still open at the cutoff
+    c.execute("UPDATE support_tickets SET status='OPEN', resolved_at=NULL "
+              "WHERE resolved_at >= ?", (as_of,))
+    c.commit()
+    c.close()
+    full, _ = build_features(as_of=as_of)
+    trimmed, _ = build_features(as_of=as_of, db_path=past)
+    pd.testing.assert_frame_equal(full, trimmed)
+
+
+def test_labels_are_strictly_future_and_each_churn_counted_once():
+    from datetime import datetime, timedelta
+    from churn.config import HORIZON_DAYS, TEST_CUTOFF_DAYS, TRAIN_CUTOFFS_DAYS, TRUTH_PATH
+    from churn.features import build_snapshots
+    # training label windows end where the test window starts
+    assert min(TRAIN_CUTOFFS_DAYS) - HORIZON_DAYS >= TEST_CUTOFF_DAYS
+    snaps, _ = build_snapshots(list(TRAIN_CUTOFFS_DAYS) + [TEST_CUTOFF_DAYS])
+    truth = {r["user_id"]: r for r in json.load(open(TRUTH_PATH))}
+    positives = snaps[snaps["churned"] == 1]
+    assert len(positives) > 0
+    assert positives["user_id"].is_unique        # one churn event -> exactly one snapshot
+    for row in snaps.itertuples():
+        t = datetime.fromisoformat(row.as_of)
+        r = truth[row.user_id]
+        if r["churned"]:
+            until = datetime.fromisoformat(r["active_until"])
+            assert until > t                     # already-churned customers are never scored
+            assert row.churned == int(until <= t + timedelta(days=HORIZON_DAYS))
 
 
 def test_scoring_works_without_answer_key_from_any_directory(tmp_path, monkeypatch):
@@ -37,7 +85,7 @@ def test_scoring_works_without_answer_key_from_any_directory(tmp_path, monkeypat
     with pytest.raises(FileNotFoundError):       # proves the answer key is really hidden
         add_labels(build_features()[0])
     df = score_customers()
-    assert len(df) == 300
+    assert len(df) == len(build_features()[0])
     assert df["churn_probability"].between(0, 1).all()
 
 
@@ -211,13 +259,14 @@ def test_uplift_method_recovers_planted_effect():
     assert spread["low"] < planted_effect(truth) < spread["high"]
 
 
-def test_oof_probabilities_cover_every_customer():
-    from churn.archetype_eval import oof_probabilities
-    df, cols = build_features()
-    df = add_labels(df)
-    oof = oof_probabilities(df[cols], df["churned"])
-    assert len(oof) == len(df)
-    assert ((oof > 0) & (oof < 1)).all()
+def test_grouped_cv_keeps_each_customer_in_one_fold():
+    from churn.config import TRAIN_CUTOFFS_DAYS
+    from churn.features import build_snapshots
+    from churn.train_model import grouped_cv_aucs
+    train, cols = build_snapshots(TRAIN_CUTOFFS_DAYS)
+    aucs = grouped_cv_aucs(train[cols], train["churned"], train["user_id"])
+    assert len(aucs) == 5
+    assert all(0 <= a <= 1 for a in aucs)
 
 
 def test_no_timestamps_after_reference_time():

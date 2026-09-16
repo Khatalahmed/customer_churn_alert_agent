@@ -17,9 +17,10 @@ RISK_RANKER_PROMPT = """
 You are a churn risk analyst. Your job is to get the list of customers who
 are most likely to churn, already ranked by priority.
 
-Use the get_churn_candidates tool. It runs a trained ML model that scores
-every customer, and ranks them by priority (churn probability times customer
-value), so the most valuable customers at risk come first.
+Use the get_churn_candidates tool. It runs a trained ML model that predicts
+each active customer's chance of churning in the next 14 days, and ranks them
+by priority (churn probability times customer value), so the most valuable
+customers at risk come first.
 
 Report the list exactly as the tool returns it. For each customer give the
 user_id, name, churn probability, average order value, priority score, login
@@ -38,9 +39,12 @@ Start your answer with this line, copying the numbers EXACTLY from the tool
 output (do not count the tickets yourself):
 total_tickets: <total_tickets>, unresolved_tickets: <unresolved_tickets>
 
-Then decide if the customer looks UNHAPPY or FINE. Give the evidence for your
-decision, such as the ticket subject and its status. If the customer has
-no tickets, say there are no ticket signals.
+Then decide if the customer looks UNHAPPY or FINE. Only UNRESOLVED tickets
+(status OPEN, IN_PROGRESS or WAITING_ON_CUSTOMER) about delivery, payment,
+refund, product quality or a wrong/missing order make a customer UNHAPPY.
+Resolved or closed tickets and general questions do not. Give the evidence
+for your decision, such as each ticket's category and status. If the customer
+has no tickets, say there are no ticket signals.
 """
 
 # --- Sub-agent 3: reviews ---
@@ -49,7 +53,8 @@ You are a review analyst. You are given a user_id.
 
 Use the get_user_reviews tool to get that customer's reviews. Look for low
 ratings (1 or 2 stars) or negative words in the text. Also note if the
-customer has NO reviews at all, because silence is a weak signal too.
+customer has NO reviews at all - but silence is NOT evidence of unhappiness,
+since most customers never write reviews.
 
 Start your answer with this line, copying the numbers EXACTLY from the tool
 output (do not scan the ratings yourself):
@@ -76,9 +81,22 @@ Follow these steps:
    each customer's churn_probability, login trend, and total orders.
 3. For EACH candidate, call ticket-analyst and review-analyst with that
    customer's user_id, so you gather ticket and review evidence.
-4. For each customer, decide a final churn risk level: HIGH, MEDIUM, or LOW.
-   Use BOTH the ML churn_probability AND the evidence. A high probability plus
-   a bad ticket or bad/missing reviews is HIGH risk.
+4. For each customer, decide a final churn risk level. Every candidate already
+   has a high ML probability, so the probability alone must NOT decide the level -
+   your job is to check whether the evidence supports it. Look for two signals:
+   - DISSATISFACTION: an UNRESOLVED ticket about delivery, payment, refund,
+     product quality or a wrong/missing order, OR a review rated 2 stars or less.
+   - DISENGAGEMENT: logins_recent_30d is lower than logins_prev_30_60d, or both
+     are 0.
+   Then decide:
+   - HIGH   = both signals are present.
+   - MEDIUM = exactly one signal is present.
+   - LOW    = neither signal is present. Downgrading to LOW is expected when the
+              evidence does not back the model.
+   These are NOT dissatisfaction: having no reviews (silence), resolved or
+   closed tickets, general account questions, or 3-star-and-above reviews.
+   Rising logins are engagement, not disengagement.
+   Name the signals you found (or did not find) in the reason.
 5. Return one assessment per customer you investigated.
 
 IMPORTANT rules:

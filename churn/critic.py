@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .config import PREDICTIONS_PATH, REVIEWED_PATH, TRUTH_PATH
+from .config import PREDICTIONS_PATH, REVIEWED_PATH
 
 
 class CriticVerdict(BaseModel):
@@ -63,11 +63,11 @@ def main():
 
     critic = get_model().with_structured_output(CriticVerdict)
 
+    from .eval import future_churners
+
     with open(PREDICTIONS_PATH) as f:
         preds = json.load(f)
-    with open(TRUTH_PATH) as f:
-        truth = json.load(f)
-    churned = {r["user_id"] for r in truth if r["churned"]}
+    churned = future_churners()
 
     reviewed = []
     print("Critic reviewing each verdict...\n")

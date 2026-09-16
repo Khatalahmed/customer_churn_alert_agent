@@ -19,7 +19,9 @@ import sqlite3
 
 from langchain.tools import tool
 
-from .config import connect_readonly
+from .config import analysis_time, connect_readonly
+
+UNRESOLVED = ("OPEN", "IN_PROGRESS", "WAITING_ON_CUSTOMER")
 
 
 def _connect_readonly() -> sqlite3.Connection:
@@ -35,27 +37,33 @@ def get_user_tickets(user_id: int) -> str:
 
     This returns a summary (total_tickets, unresolved_tickets) plus each
     ticket with its type, priority, status, subject, description, and
-    resolution notes. It helps us find bad signs, like a refund that was
-    never given or a delivery problem that was never fixed.
+    resolution notes, all as of the analysis time. It helps us find bad
+    signs, like a refund that was never given or a delivery problem that was
+    never fixed.
 
     Args:
         user_id: the id of the customer.
     """
     conn = _connect_readonly()
+    as_of = analysis_time(conn)
     rows = conn.execute(
         """SELECT ticket_id, category, priority, status, subject,
                   description, resolution_notes, created_at, resolved_at
            FROM support_tickets
-           WHERE user_id = ?
+           WHERE user_id = ? AND created_at < ?
            ORDER BY created_at DESC""",
-        (user_id,),
+        (user_id, as_of),
     ).fetchall()
     conn.close()
     tickets = [dict(r) for r in rows]
+    for t in tickets:
+        # resolved only AFTER the analysis time -> it was still open at that time
+        if t["resolved_at"] and t["resolved_at"] >= as_of:
+            t.update(status="OPEN", resolution_notes=None, resolved_at=None)
     # counted here, in code, so the LLM copies the number instead of counting
-    unresolved = sum(1 for t in tickets
-                     if t["status"] in ("OPEN", "IN_PROGRESS", "WAITING_ON_CUSTOMER"))
+    unresolved = sum(1 for t in tickets if t["status"] in UNRESOLVED)
     return json.dumps({
+        "analysis_time": as_of,
         "total_tickets": len(tickets),
         "unresolved_tickets": unresolved,
         "tickets": tickets,
@@ -76,17 +84,19 @@ def get_user_reviews(user_id: int) -> str:
         user_id: the id of the customer.
     """
     conn = _connect_readonly()
+    as_of = analysis_time(conn)
     rows = conn.execute(
         """SELECT review_id, rating, review_title, review_text, created_at
            FROM reviews
-           WHERE user_id = ?
+           WHERE user_id = ? AND created_at < ?
            ORDER BY created_at DESC""",
-        (user_id,),
+        (user_id, as_of),
     ).fetchall()
     conn.close()
     reviews = [dict(r) for r in rows]
     # computed here, in code, so the LLM copies the number instead of scanning
     return json.dumps({
+        "analysis_time": as_of,
         "total_reviews": len(reviews),
         "worst_review_rating": min((r["rating"] for r in reviews), default=0),
         "reviews": reviews,

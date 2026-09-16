@@ -2,7 +2,7 @@
 
 # 🚨 Customer Churn Early-Warning Agent
 
-### An XGBoost model predicts *who* is leaving. An LLM multi-agent investigates *why* — and every claim is checked against the database.
+### An XGBoost model predicts *who* will stop ordering in the next 14 days. An LLM multi-agent investigates *why* — and every claim is checked against the database.
 
 Built to prove a point: **measure everything, including the techniques that fail.**
 
@@ -16,8 +16,8 @@ Built to prove a point: **measure everything, including the techniques that fail
 
 <table>
 <tr>
-<td align="center"><b>0.73</b><br><sub>ROC-AUC<br><i>honest, no leakage</i></sub></td>
-<td align="center"><b>0.80</b><br><sub>precision<br><i>@ top-15</i></sub></td>
+<td align="center"><b>0.71</b><br><sub>ROC-AUC<br><i>out-of-time, 14 days ahead</i></sub></td>
+<td align="center"><b>0.20</b><br><sub>precision<br><i>agent verdicts</i></sub></td>
 <td align="center"><b>100%</b><br><sub>evidence<br><i>fidelity</i></sub></td>
 <td align="center"><b>~270k</b><br><sub>tokens<br><i>per scan</i></sub></td>
 </tr>
@@ -48,17 +48,17 @@ Cheap ML scores everyone. Expensive AI investigates only the few that matter.
 
 | Stage | Engine | Cost | Covers |
 |---|---|---|---|
-| **1 · Predict** | XGBoost model | ~free | **all 300** customers |
+| **1 · Predict** | XGBoost model | ~free | **every active** customer (~220) |
 | **2 · Investigate** | LLM deep agent + 3 sub-agents | ~270k tokens/scan | **top 15** by risk × value |
 
-The agent is meant to **check** the model, not just trust it: it can downgrade a "high risk"
-flag when the tickets and reviews don't back it up. In the latest run it downgraded one
-customer to MEDIUM but none to LOW — so on this shortlist it explained the risk rather than
-filtering out the model's false alarms (see [Agent metrics](#agent-metrics)).
+The agent **checks** the model rather than trusting it: it downgrades a "high risk" flag when
+the tickets and reviews don't back it up. On the latest shortlist it dropped 5 of 15 customers
+to LOW — 4 rightly, 1 a real churner it talked itself out of (see
+[Agent metrics](#agent-metrics)).
 
 ```mermaid
 flowchart LR
-    A[SQLite DB<br/>300 customers] --> B[XGBoost<br/>leakage-safe]
+    A[SQLite DB<br/>300 customers] --> B[XGBoost<br/>point-in-time]
     B --> C[rank by<br/>risk × value]
     C --> D[Deep agent<br/>top-15]
     D --> E[ticket + review<br/>sub-agents]
@@ -74,20 +74,20 @@ flowchart LR
 One command → an evidence-backed retention worklist (real output, `gpt-6-astra`):
 
 ```text
-[HIGH  ] user  21 Neha Menon    prob=0.89 -> retention call
-  reason: High ML probability, logins collapsing from 14 to 0, two open refund
-          complaints including an urgent issue, and a 2-star leaking-package review.
+[HIGH  ] user   6 Priya Nair    prob=0.91 -> retention call
+  reason: Both signals are present: an open missing-items ticket establishes
+          dissatisfaction despite a 5-star review, and logins fell from 13 to 2,
+          showing disengagement.
 
-[MEDIUM] user 133 Karan Gill    prob=0.98 -> retention call
-  reason: Very high ML probability and logins falling from 2 to 0 warrant outreach.
-          However, the review is 5 stars and the unresolved ticket is only a general
-          account question, so dissatisfaction is not established.
+[LOW   ] user 291 Kavya Menon   prob=0.60 -> ignore
+  reason: Neither signal is present: no tickets or reviews establish dissatisfaction,
+          and logins increased from 0 to 1 rather than showing disengagement.
 ```
 
 Then it **grades itself** — no guessing:
 
 ```text
-Precision @ top-15 : 0.80     (12 of 15 escalations were real churners)
+Precision (agent)  : 0.20     (2 of 10 escalations churned in the next 14 days)
 Evidence fidelity  : 100%     (75/75 cited facts matched the database)
 Uplift method check: a hold-out test recovers the planted coupon effect (+31 pts)
                      on average, but one test on 78 churners ranges +14 to +47 pts
@@ -96,20 +96,25 @@ Uplift method check: a hold-out test recovers the planted coupon effect (+31 pts
 ### Agent metrics
 
 Measured in one live run on **`gpt-6-astra` via Azure OpenAI** (Responses API, keyless
-Entra ID auth), 2026-09-15, against the frozen dataset:
+Entra ID auth) against the frozen dataset, analysis time 2026-08-04:
 
 | Metric | Result |
 |---|---|
-| Precision @ top-15 | **0.80** — 12 of 15 flagged customers really churned |
-| Recall | 0.15 — capped by design: only 15 of 78 churners can be investigated per scan |
+| Precision (agent verdicts) | **0.20** — 2 of 10 flagged customers churned within 14 days |
+| Recall | 0.12 — 2 of the 16 churners; only 15 customers are investigated per scan |
 | Evidence fidelity | **100%** — all 75 cited numbers matched the database |
-| Tokens per scan | 260,948 in / 8,941 out |
+| Tokens per scan | 264,087 in / 8,333 out |
 
-**Honest finding:** the agent flagged all 15 shortlisted customers (14 HIGH, 1 MEDIUM) and
-downgraded none to LOW. Its precision is therefore identical to the ML shortlist's — on this
-run the investigation added evidence and explanations, not better filtering. The three false
-alarms (users 104, 123, 291) had real complaints or missing reviews that the agent read as
-risk.
+**What the agent changed.** It downgraded 5 of the 15 to LOW: 4 correctly, and 1 (user 173)
+was a real churner it argued away because logins had risen. Precision therefore stayed level
+with the shortlist it was given (0.20), while recall fell from 3 to 2. A tightened rubric —
+HIGH needs *both* an unresolved complaint and falling logins — is what made it willing to say
+LOW at all; before that it flagged every customer it looked at.
+
+**What the shortlist actually contained.** Of the 15 customers ranked highest: 3 churn in the
+next 14 days, **4 had already churned** before the cutoff (quiet for under 28 days, so still
+counted as active — the model spotted them, just late), and 8 never churn. The strict label
+counts those 4 as false alarms; a retention team would still want to call them.
 
 These numbers need a live LLM call, so CI does **not** regenerate them, and LLM output varies
 between runs. To refresh them:
@@ -126,38 +131,57 @@ The uplift line is simulated from the answer key and *is* reproducible.
 
 ## Results
 
-### Per archetype: where the model works — and where it doesn't
+### Predicting the future is much harder than recognising the past
 
-The simulator plants five customer types. Two really churn; two are **traps** that only
-*look* dormant (people on holiday, and loyal buyers who order rarely).
+The first version of the model labelled customers who had **already** stopped ordering and
+used their whole history — so it was *detecting* past churn, not warning about future churn.
+It is now built on **point-in-time snapshots**: at a cutoff date the model sees only data from
+before that date and predicts who stops being active in the **next 14 days**. It trains on
+three earlier snapshots and is tested on a later one it never saw.
 
-![Per-archetype recall vs false-alarm](docs/img/archetype_recall.png)
+| | Detecting past churn (v1) | Predicting the next 14 days (now) |
+|---|---|---|
+| ROC-AUC | 0.73 (random split) | **0.71** out-of-time · 0.63 ± 0.08 grouped CV |
+| Churn rate in the scored group | 26% | 7.3% |
+| Precision of the top 15 by probability | ≈ 0.80 | **0.27** — 3.7× random |
+| Precision of the agent's shortlist (probability × value) | 0.80 | **0.20** — 2.8× random |
 
-Measured **out-of-fold** (5-fold CV, each customer scored by a model that never saw them;
-mean over 10 fold seeds):
+![Precision at top 15 vs random](docs/img/precision_at_15.png)
 
-- **Gradual faders are caught more often than cliff-droppers** (55% vs 39% at a 0.5
-  threshold). Recall at a fixed threshold is modest — the pipeline relies on *ranking*
-  the top 15, not on the threshold.
-- **The traps are the weak spot.** Loyal low-frequency buyers (45%) and vacationers (30%)
-  are flagged at 2–3× the rate of regular customers (15%). A likely cause: they have few
-  orders and reviews, so their rate features are noisy. This is exactly where the agent's
-  ticket/review check has to earn its keep.
+Real early warning is clearly better than random — but only 3–4 of the 15 highest-risk
+customers actually churn. A test guarantees the setup: deleting every row dated after the
+cutoff changes **no** feature value, and each churn event is labelled exactly once.
 
-<sub>An earlier version of this section reported 88% / 91% recall and 15–20% trap
-false-alarms. Those were **in-sample** (the saved model had trained on most of those
-customers). `churn.archetype_eval` now prints both columns so the gap stays visible.</sub>
+### Per archetype (held-out snapshot)
 
-### It uses signals that make sense
+The simulator plants five customer types: two really churn, two are **traps** that only
+*look* like churners (a vacationer goes quiet, a loyal bulk-buyer orders rarely).
+
+| Archetype | Active | Churn in 14 days | Flagged churners | False alarms | In top 15 |
+|---|---|---|---|---|---|
+| cliff-dropper | 10 | 10 | 1 / 10 | – | 2 |
+| gradual-fader | 6 | 6 | 2 / 6 | – | 2 |
+| vacationer (trap) | 22 | 0 | – | 2 / 22 (9%) | 2 |
+| loyal bulk-buyer (trap) | 22 | 0 | – | 2 / 22 (9%) | 2 |
+| regular | 160 | 0 | – | 6 / 160 (4%) | 7 |
+
+- **Cliff-droppers give almost no warning** — they stop abruptly, with no drop in activity
+  beforehand. Faders taper first, so they are easier to see coming.
+- **Traps are flagged about twice as often as regular customers** (9% vs 4%).
+- Counts are small (16 churners in one snapshot): read these as directions, not rates.
+
+### What the model relies on
 
 ![XGBoost feature importance](docs/img/feature_importance.png)
 
-Every feature is a **rate or average** (cancellation rate, unresolved-ticket rate, review
-score) — never a raw count. Raw counts leak the answer; rates capture the *cause*.
+Experience-quality rates (tickets per order, unresolved-ticket rate, cancellation rate) still
+lead. Recent engagement — logins and orders in the last weeks, days since the last one — now
+contributes too. In v1 those features would have leaked the label; with a future label they
+are exactly the early-warning signals a retention team would see.
 
 <sub>*Numbers are exactly reproducible: the simulator uses a fixed seed and a frozen reference
 time (2026-09-01 12:00 IST) stored in the database, so every regeneration gives the same data
-and the same model (test AUC 0.729).*</sub>
+and the same model.*</sub>
 
 ---
 
@@ -167,8 +191,8 @@ Every decision below was **measured, not assumed**:
 
 | Decision | Why — with the evidence |
 |---|---|
-| 🚫 **No recency features** | They'd fake a ~0.99 AUC (they *are* the label). Rates give an honest **0.73** instead. |
-| 🔬 **SHAP-tested features** | Dropped `tenure_days` (removing it held AUC → overfit noise); kept `avg_order_value` (removing it dropped AUC 0.73→0.66 → real signal). |
+| ⏳ **Point-in-time labels** | v1 labelled customers who had *already* left, so recency features faked ~0.99 AUC and even the "honest" 0.73 model was detecting the past. Now features use only data before a cutoff and the label is churn in the *next* 14 days, tested on a later snapshot: AUC **0.71**, precision@15 **0.27**. Weaker — and true. |
+| 🔬 **SHAP-tested features** | (v1) Dropped `tenure_days` (removing it held AUC → overfit noise); kept `avg_order_value` (removing it dropped AUC 0.73→0.66 → real signal). |
 | ⚖️ **Rates, not counts** | Raw ticket count was *reversed* — churned users left early, so had *fewer* events. Rates kill the confound. |
 | ❌ **A critic agent I removed** | Added a skeptical reviewer, **measured it, and it hurt** — it downgraded real churners on an already-clean shortlist. Kept as a documented negative result. |
 | 🔁 **Provider = config** | One factory swaps Vertex AI / Groq / Gemini via an env var. (Found Groq's Llama-70B emits tool calls the harness rejects; Gemini doesn't.) |
@@ -197,8 +221,8 @@ Knowing what *not* to build is half the design:
 ```text
 churn/                     # source package
 ├── quick_commerce_sim.py  #   synthetic data (causal churn + archetypes) + answer key
-├── features.py            #   leakage-safe feature table
-├── train_model.py         #   XGBoost + honest eval
+├── features.py            #   point-in-time snapshots + future (14-day) labels
+├── train_model.py         #   XGBoost, grouped CV + out-of-time test
 ├── scoring.py             #   risk × value priority tool
 ├── main.py                #   the deep agent (3 sub-agents)
 ├── eval.py / verifier.py  #   precision-recall + evidence fact-checking
@@ -245,6 +269,8 @@ docker build -t churn-agent . && docker run --rm churn-agent uv run python -m ch
 
 - **Synthetic data** — no real users. Results are framed as engineering + eval quality, never business impact.
 - **Frozen clock** — the data lives at a fixed reference time (stored in the DB, used by every time-window query) so results are reproducible. `quick_commerce_sim init --now wallclock` restores live timing, at the cost of reproducibility.
+- **Small sample** — 38 churn events to train on and 16 in the test snapshot, so AUC swings between 0.49 and 0.73 across CV folds. Treat every number as a direction, not a precise rate.
+- **Evaluated in the past** — the pipeline runs "as of" the test cutoff (2026-08-04) so its 14-day outcome can be checked. `CHURN_AS_OF=reference` scores the latest data instead, where no outcome is known yet.
 - **Not million-scale** — per-customer LLM investigation suits top-N triage; the ML layer keeps the agent's workload bounded.
 
 ---

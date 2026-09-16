@@ -10,6 +10,7 @@ WHY  : File names used to be repeated as relative strings in ~15 modules, so
 """
 import os
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 
 DATA_DIR = Path(os.getenv("CHURN_DATA_DIR") or Path(__file__).resolve().parent.parent)
@@ -21,6 +22,14 @@ PREDICTIONS_PATH = DATA_DIR / "churn_predictions.json"
 REVIEWED_PATH = DATA_DIR / "churn_predictions_reviewed.json"
 CONTACTED_PATH = DATA_DIR / "contacted.json"
 REPORT_PATH = DATA_DIR / "retention_report.md"
+
+# --- point-in-time prediction setup -------------------------------------------
+# At a cutoff time T the model sees ONLY data from before T and predicts whether
+# a currently active customer stops being active in the next HORIZON_DAYS.
+HORIZON_DAYS = 14
+ACTIVE_WINDOW_DAYS = 28            # "active at T" = any login in the 28 days before T
+TRAIN_CUTOFFS_DAYS = (70, 56, 42)  # training snapshots, in days before the reference time
+TEST_CUTOFF_DAYS = 28              # held-out snapshot: its labels start where training's end
 
 
 def reference_now(conn: sqlite3.Connection) -> str:
@@ -40,6 +49,28 @@ def reference_now(conn: sqlite3.Connection) -> str:
         raise RuntimeError("database has no reference time - regenerate it with "
                            "`python -m churn.quick_commerce_sim init`")
     return row[0]
+
+
+def cutoff_time(conn: sqlite3.Connection, days_before_reference: int) -> str:
+    """A snapshot cutoff: the reference time minus N days (UTC string)."""
+    ref = datetime.fromisoformat(reference_now(conn))
+    return (ref - timedelta(days=days_before_reference)).isoformat(sep=" ")
+
+
+def analysis_time(conn: sqlite3.Connection) -> str:
+    """The point in time the pipeline looks from - scoring, tools and verifier.
+
+    Default: the held-out test cutoff, the latest moment whose 14-day outcome is
+    known, so the agent can be evaluated honestly. CHURN_AS_OF=reference scores
+    "now" (production-style, no outcome to check); any other value is read as a
+    UTC timestamp.
+    """
+    value = os.getenv("CHURN_AS_OF")
+    if value == "reference":
+        return reference_now(conn)
+    if value:
+        return datetime.fromisoformat(value).isoformat(sep=" ")
+    return cutoff_time(conn, TEST_CUTOFF_DAYS)
 
 
 def connect_readonly(path=None) -> sqlite3.Connection:

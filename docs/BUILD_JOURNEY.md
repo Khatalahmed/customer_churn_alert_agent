@@ -83,6 +83,8 @@
 
 **Lesson:** *Avoid data leakage. Recent-activity features give a fake 0.99 AUC because they ARE the label. An honest 0.73 beats a suspicious 0.99.*
 
+> Later we found a deeper version of the same problem: even the 0.73 model was trained to recognise customers who had *already* left. See **Stage 12**.
+
 ---
 
 ## STAGE 6 — Explainability + lifecycle
@@ -102,7 +104,7 @@
 - `critic.py` → a skeptical 4th reviewer. We **measured it and found it HURT** on our clean shortlist — kept as an honest negative result.
 - `uplift.py` → coupon effect measured against a **hold-out control**. First reported as "+38% true causal uplift" — but the coupon effect is planted by the simulator, so that number was circular (and just one random draw: re-running on a later dataset gave +26%). **Corrected** to a method check: the hold-out estimate averages +31 pts, matching the planted +31, while a single test on 78 churners ranges +14 to +47 pts.
 - `drift.py` → **PSI** drift detection: the model flags itself for retraining when the data shifts.
-- Cost tracking in `main.py` → ~₹5 per scan; input:output tokens ≈ 27:1.
+- Cost tracking in `main.py` → token usage per scan; input:output ≈ 30:1. (The rupee figure we first quoted was dropped later: prices belong in `.env`, not hard-coded, and ours were never verified.)
 
 **Lesson:** *Measure every technique — including the ones that don't help. That honesty is the strongest signal.*
 
@@ -153,6 +155,33 @@
 - `INTERVIEW_PREP.md` (git-ignored, personal) → Q1–Q9 + a 60-second pitch + numbers to memorise.
 
 **Lesson:** *A brilliant project you can't present is worth less than a modest one you can. The last stage is being able to TALK about it.*
+
+---
+
+## STAGE 12 — From detecting churn to predicting it
+
+**The problem we found:** the label marked customers who had *already* stopped ordering, and the features used their whole history — including the weeks after they left. So the model learned "does this look like someone who is already gone?" That's detection, not early warning.
+
+**What:** Point-in-time snapshots.
+- `features.py` → at a cutoff date T, only customers active in the 28 days before T, and only data from before T — even each ticket's status *as it was at T*.
+- The label is now **"stops being active in the 14 days after T"**. Customers who had already churned by T are left out.
+- `train_model.py` → trains on snapshots 70, 56 and 42 days back; tested on the snapshot 28 days back, whose labels start exactly where training's end. Cross-validation is grouped by customer.
+- Scoring, the agent's tools, the verifier and eval all run "as of" the test cutoff, so the agent is graded on a future it couldn't see.
+- Two new tests: deleting every row after the cutoff changes no feature; each churn event is labelled exactly once, always in the future.
+
+**Result:**
+
+| | Detecting past churn | Predicting the next 14 days |
+|---|---|---|
+| AUC | 0.73 | 0.71 out-of-time (0.63 ± 0.08 CV) |
+| Churn rate | 26% | 7.3% |
+| Precision@15 | ≈ 0.80 | 0.27 by probability, 0.20 for the risk × value shortlist |
+
+Recency features stopped being leakage and became real signals — but cliff-droppers still give almost no warning, and traps are flagged twice as often as regular customers.
+
+**The agent, re-measured at the new analysis time:** precision 0.20 (2 of 10 flagged), recall 0.12, evidence fidelity 100%. It downgraded 5 of 15 to LOW - 4 right, 1 a real churner it argued away. Of the 15 shortlisted, 3 churn within 14 days, 4 had already churned before the cutoff, and 8 never churn.
+
+**Lesson:** *Ask what the label really means at prediction time. A model can be leakage-free feature-by-feature and still answer an easier question than the one you care about.*
 
 ---
 

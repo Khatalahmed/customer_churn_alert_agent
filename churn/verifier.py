@@ -16,34 +16,35 @@ LOGIC: We query the database ourselves, on purpose, so the check does not
 """
 import json
 
-from .config import PREDICTIONS_PATH, connect_readonly, reference_now
+from .config import PREDICTIONS_PATH, analysis_time, connect_readonly
 
 
-def real_facts(conn, user_id):
-    """Compute the true five numbers for one user, straight from the DB."""
-    ref = reference_now(conn)   # the data's own "now", not the wall clock
+def real_facts(conn, user_id, as_of=None):
+    """Compute the true five numbers for one user, as of the analysis time."""
+    as_of = as_of or analysis_time(conn)   # the pipeline's point in time
     cur = conn.cursor()
     prev = cur.execute(
         """SELECT COUNT(*) FROM auth_audit_log
            WHERE user_id=? AND event_type='LOGIN'
              AND event_timestamp BETWEEN datetime(?,'-60 days')
                                      AND datetime(?,'-30 days')""",
-        (user_id, ref, ref),
+        (user_id, as_of, as_of),
     ).fetchone()[0]
     recent = cur.execute(
         """SELECT COUNT(*) FROM auth_audit_log
            WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp >= datetime(?,'-30 days')""",
-        (user_id, ref),
+             AND event_timestamp >= datetime(?,'-30 days')
+             AND event_timestamp < ?""",
+        (user_id, as_of, as_of),
     ).fetchone()[0]
     orders = cur.execute(
-        "SELECT COUNT(*) FROM orders WHERE user_id=?", (user_id,)
+        "SELECT COUNT(*) FROM orders WHERE user_id=? AND placed_at < ?", (user_id, as_of)
     ).fetchone()[0]
     tickets = cur.execute(
-        "SELECT COUNT(*) FROM support_tickets WHERE user_id=?", (user_id,)
+        "SELECT COUNT(*) FROM support_tickets WHERE user_id=? AND created_at < ?", (user_id, as_of)
     ).fetchone()[0]
     worst = cur.execute(
-        "SELECT MIN(rating) FROM reviews WHERE user_id=?", (user_id,)
+        "SELECT MIN(rating) FROM reviews WHERE user_id=? AND created_at < ?", (user_id, as_of)
     ).fetchone()[0]
     worst = worst if worst is not None else 0    # 0 means the user has no reviews
     return {
