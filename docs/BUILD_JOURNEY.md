@@ -268,8 +268,8 @@ coverage - patterns only recognise claim types they were taught - so coverage is
 reported next to fidelity, and a clause nothing recognises counts as UNCHECKED,
 never as correct.
 
-**Result on the live run:** 81 claims extracted from 15 reasons, all supported -
-100% prose fidelity, 74% clause coverage. The uncovered quarter is rubric
+**Result on the live run:** 77 claims extracted from 15 reasons, all supported -
+100% prose fidelity, 71% clause coverage. The uncovered portion is rubric
 restatement ("Dissatisfaction: not established under the criteria"), which
 contains no factual claim to check.
 
@@ -280,6 +280,11 @@ contains no factual claim to check.
   comma-segment. A checker that cries wolf gets switched off.
 - A checker that only ever passes is worthless. Eight corrupted reasons - one per
   claim type - are in the test suite, so the thing is proven able to fail.
+- A fresh agent run then found a second false alarm: the agent writes "excluded"
+  for a ticket that is OPEN but outside the rubric's serious categories, and the
+  extractor read it as "closed". Both false alarms came from the checker, not the
+  agent - which is the failure mode to expect, and the reason every flag gets
+  read against the database before it is believed.
 
 **Lesson:** *The structured half was the easy half. What nobody was checking was
 the part everybody reads.*

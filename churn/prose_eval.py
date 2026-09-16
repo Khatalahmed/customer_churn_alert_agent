@@ -47,7 +47,10 @@ CATEGORY_WORDS = [
 # Does the clause say the ticket is still open, or that it is finished?
 # \bresolved\b does not match inside "unresolved", so the order is safe.
 UNRESOLVED_MARKERS = r"\bunresolved\b|\bremains?\b|\bstill\b|\bopen\b|\bin[\s-]progress\b|\bpending\b|\boutstanding\b|\bwaiting\b"
-RESOLVED_MARKERS = r"\bclosed\b|\bresolved\b|\bexcluded\b|\bsettled\b"
+# "excluded" and "does not qualify" are NOT resolution markers: the agent uses
+# them for a ticket that is open but outside the rubric's serious categories.
+# Reading one as "closed" produced a false alarm on correct prose.
+RESOLVED_MARKERS = r"\bclosed\b|\bresolved\b|\bsettled\b"
 
 # Descriptive claims about what a complaint SAYS. Only content words, so a
 # claim cannot pass just by repeating the category it already claimed.
@@ -254,6 +257,13 @@ def check_clause(clause, facts):
         claims.append(_claim(
             "review_rating_range", match.group(0), bool(real),
             f"ratings on file: {sorted(r['rating'] for r in facts['reviews'])}", match.span()))
+    # "1- and 2-star reviews" enumerates two ratings, not a range.
+    for match in re.finditer(r"(\d)\s*[-–]?\s*and\s+(\d)\s*[-\s]?stars?", low):
+        consumed.append(match.span())
+        for rating in (int(match.group(1)), int(match.group(2))):
+            claims.append(_claim(
+                "review_rating", f"{rating}-star", any(r["rating"] == rating for r in facts["reviews"]),
+                f"ratings on file: {sorted(r['rating'] for r in facts['reviews'])}", match.span()))
     for match in re.finditer(r"(\d)\s*[-\s]?stars?", low):
         if any(s <= match.start() < e for s, e in consumed):
             continue

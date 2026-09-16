@@ -695,3 +695,24 @@ def test_prose_counts_unchecked_clauses_instead_of_passing_them():
                          _prose_facts())
     assert result["claims"] == []
     assert result["unchecked_clauses"] == 1
+
+
+def test_prose_does_not_read_rubric_exclusion_as_resolution():
+    # The agent writes "excluded" for a ticket that is OPEN but outside the
+    # rubric's serious categories. Reading that as "closed" flagged correct
+    # prose as a hallucination.
+    from churn.prose_eval import check_prose
+    facts = _prose_facts()
+    result = check_prose(
+        "The general account ticket is excluded; it is not a serious category.",
+        facts)
+    assert [c for c in result["claims"] if not c["ok"]] == []
+
+
+def test_prose_reads_enumerated_ratings_as_two_claims():
+    from churn.prose_eval import check_prose
+    facts = _prose_facts()                       # only a 1-star review on file
+    claims = check_prose("1- and 2-star reviews about quality.", facts)["claims"]
+    ratings = [c for c in claims if c["kind"] == "review_rating"]
+    assert len(ratings) == 2                     # not one range, not one number
+    assert [c["ok"] for c in ratings] == [True, False]   # the 2-star is invented

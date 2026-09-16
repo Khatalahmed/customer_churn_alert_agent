@@ -192,9 +192,9 @@ Latest live run on **`gpt-6-astra` via Azure OpenAI** (Responses API, keyless En
 | Verdicts | 14 MEDIUM, 1 LOW — no HIGH: complaints, but customers still logging in |
 | Precision | 0.07 (1 of 14) — the ML shortlist decides who; the agent explains |
 | Evidence fidelity | **100%** — all 90 cited facts matched the database |
-| Prose fidelity | **100%** — 81 claims extracted from the written reasons, all supported (74% of clauses yielded a checkable claim) |
+| Prose fidelity | **100%** — 77 claims extracted from the written reasons, all supported (71% of clauses yielded a checkable claim) |
 | Trajectory | **9/9 rules** — ranked once, checked tickets *and* reviews for all 15, nobody off-list, no repeats, 31 calls within budget |
-| Cost | 265,501 in / 8,564 out tokens, ~2 minutes |
+| Cost | 267,252 in / 8,853 out tokens, ~2 minutes |
 
 **Trajectory evals** (`churn/trace_eval.py`) are the part most agent projects skip: precision
 tells you the verdict was right, not that the agent got there properly. Every tool call is
@@ -274,7 +274,7 @@ Every decision below was **measured, not assumed**:
 | 🎯 **Risk picks, value orders** | Ranking the shortlist by risk × order value cost **40%** of its precision (0.073 vs 0.120): order value carries no churn signal. |
 | 💸 **An ROI that says no** | No paid intervention pays for itself on this shortlist; the honest recommendation is a ₹5 email, with the break-even figure that would change that. |
 | 🔒 **Least-privilege + PII** | Read-only DB; tools never return phone/email; a redaction middleware scrubs any leak before the LLM. |
-| 🛠 **Production-ready** | Scheduled scan with alerting · FastAPI service · Docker · keyless Azure auth · 51 tests in GitHub Actions. |
+| 🛠 **Production-ready** | Scheduled scan with alerting · FastAPI service · Docker · keyless Azure auth · 53 tests in GitHub Actions. |
 
 ### Things I measured that did **not** work
 
@@ -372,7 +372,7 @@ docker build -t churn-agent . && docker run --rm churn-agent uv run python -m ch
 - **A measured ceiling** — an oracle with the simulator's hidden state reaches precision@15 of 0.21; ours is 0.12. Most of the remaining gap is irreducible.
 - **Uplift cannot be measured here** — interventions change nothing in the simulator, and the sample would need ~9,500 per arm anyway. The loop reports that honestly instead of inventing a number.
 - **Evaluated in the past** — the pipeline runs "as of" 2026-08-04 so its 14-day outcome is known. `CHURN_AS_OF=reference` scores the latest data, where no outcome exists yet.
-- **Prose is checked by pattern, not by comprehension.** The claim types the extractor knows cover 74% of clauses; the rest are rubric restatements ("Dissatisfaction: not established") with nothing to check. A clause nothing recognises is reported as unchecked, never as correct.
+- **Prose is checked by pattern, not by comprehension.** The claim types the extractor knows cover 71% of clauses; the rest are rubric restatements ("Dissatisfaction: not established") with nothing to check. A clause nothing recognises is reported as unchecked, never as correct.
 
 ---
 
