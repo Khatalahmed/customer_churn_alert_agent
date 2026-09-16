@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Check, Search, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import { Badge, Empty, RiskBadge, Table, Td, Th } from "@/components/ui/primitives";
+import { ContactBar } from "./ContactBar";
 import { cn, money, moneySigned, percent } from "@/lib/format";
 import type { CustomerView } from "@/types/api";
 
@@ -65,6 +66,15 @@ export function WorklistTable({
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("expected_value");
   const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<number[]>([]);
+
+  function toggle(userId: number) {
+    setSelected((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : [...current, userId],
+    );
+  }
 
   const rows = useMemo(() => {
     let result = customers;
@@ -86,8 +96,13 @@ export function WorklistTable({
     );
   }, [customers, filter, sort, query]);
 
+  const names = Object.fromEntries(customers.map((c) => [c.user_id, c.full_name]));
+
   return (
     <div>
+      {!dense ? (
+        <ContactBar selected={selected} names={names} onClear={() => setSelected([])} />
+      ) : null}
       {!dense ? (
         <div className="mb-4 flex flex-wrap items-center gap-3">
           {/* Filter pills */}
@@ -165,6 +180,11 @@ export function WorklistTable({
             <Table>
               <thead>
                 <tr>
+                  {!dense ? (
+                    <Th className="w-[44px]">
+                      <span className="sr-only">Select</span>
+                    </Th>
+                  ) : null}
                   <Th>Customer</Th>
                   <Th>Risk</Th>
                   <Th align="right">P(churn)</Th>
@@ -194,6 +214,17 @@ export function WorklistTable({
                         style={{ background: "var(--high-vivid)", opacity: 0.6 }}
                       />
                     )}
+                    {!dense ? (
+                      <Td className="w-[44px]">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(customer.user_id)}
+                          onChange={() => toggle(customer.user_id)}
+                          aria-label={`Select ${customer.full_name}`}
+                          className="h-4 w-4 cursor-pointer accent-[var(--accent)]"
+                        />
+                      </Td>
+                    ) : null}
                     <Td>
                       <Link
                         href={`/customers/${customer.user_id}`}
