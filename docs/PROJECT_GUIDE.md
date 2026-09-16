@@ -3,6 +3,12 @@
 > **Who this is for:** a brand-new intern who just joined and needs to understand
 > WHAT we are building, WHY it matters, and HOW to build it — step by step,
 > with zero prior knowledge assumed.
+>
+> ⚠️ **This is the ORIGINAL plan, kept as written.** Several of its assumptions
+> turned out to be wrong once measured — the churn label, the "risk × value"
+> ranking, and the target numbers in the build table. For what the system
+> actually does and scores today, read the [README](../README.md); for how the
+> plan changed and why, read [BUILD_JOURNEY.md](BUILD_JOURNEY.md).
 
 ---
 
@@ -122,13 +128,19 @@ synthetic data** with a simulator script (`quick_commerce_sim.py`):
 
 - **6 tables:** `users`, `products`, `orders`, `auth_audit_log`,
   `support_tickets`, `reviews` (SQLite — one local file, zero setup).
-- **120 days** of realistic history for **40 customers**
+- **240 days** of realistic history for **3,000 customers**
   (logins, orders, tickets, reviews, weekend spikes, failed logins).
-- **The trick that makes the project work:** ~25% of customers are
-  deliberately marked as churned — they stop producing activity 2–8 weeks
-  before "today". **These planted churners are the answer key.**
-  If our agent finds them (and doesn't falsely flag active users),
-  we can compute REAL precision and recall.
+  *(The plan said 120 days and 40 customers; both were raised after measuring
+  that more data improved the model — see BUILD_JOURNEY Stage 14.)*
+- **The trick that makes the project work:** some customers are
+  deliberately planted as churners. **They are the answer key** — because WE
+  planted them, we know the ground truth and can compute REAL precision and
+  recall.
+- **How they churn matters more than how many.** The plan had them simply go
+  silent 2–8 weeks before "today". That made *who* would leave learnable but
+  *when* a coin flip, so the final version has them quit a few days after a
+  run of bad experiences (cancelled orders, unresolved tickets, low ratings).
+  Cause now precedes effect, which is what early warning needs.
 
 > Why plant churners? If every customer stayed active, the agent would have
 > nothing to find. And because WE planted them, we know the ground truth —
@@ -184,7 +196,7 @@ Never start ring N+1 until ring N runs end-to-end.
 |----------|-----------------|
 | **A2A protocol** | Our agents live in one system; A2A is for cross-organization agent interop we don't have. MCP covers our interop. |
 | **Kubernetes** | It's a weekly batch job over one SQLite file. Docker + a schedule is the *correct* deployment for this scale. |
-| **Fine-tuning** | No data volume (40 synthetic customers) and no measured prompting failure to fix. Order is: prompt → tools → fine-tune. |
+| **Fine-tuning** | No data volume (a few thousand synthetic customers) and no measured prompting failure to fix. Order is: prompt → tools → fine-tune. |
 | **Fancy UI** | The product is decision quality — eval numbers and the report. Markdown + one Plotly chart is sufficient. |
 | **Knowledge graph** | Relationships are one foreign-key hop deep; SQL answers everything exactly. Would reconsider if churn spread through referral networks. |
 | **RAG** | Data is structured — retrieval is SQL, which is exact and free. No document corpus exists here. (RAG is proven in the HR Helpdesk project.) |
