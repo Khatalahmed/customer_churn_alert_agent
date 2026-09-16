@@ -17,13 +17,15 @@ DATA_DIR = Path(os.getenv("CHURN_DATA_DIR") or Path(__file__).resolve().parent.p
 
 DB_PATH = DATA_DIR / "qcommerce.db"
 TRUTH_PATH = DATA_DIR / "churn_truth.json"             # answer key: training / eval only
-MODEL_PATH = DATA_DIR / "churn_model.pkl"
+MODEL_PATH = DATA_DIR / "churn_model.pkl"             # evaluated: never saw the test snapshot
+PRODUCTION_MODEL_PATH = DATA_DIR / "churn_model_production.pkl"  # retrained on everything
 PREDICTIONS_PATH = DATA_DIR / "churn_predictions.json"
 REVIEWED_PATH = DATA_DIR / "churn_predictions_reviewed.json"
 CONTACTED_PATH = DATA_DIR / "contacted.json"
 REPORT_PATH = DATA_DIR / "retention_report.md"
 TRACE_PATH = DATA_DIR / "agent_trace.json"      # tool calls of the last agent run
 WORKLIST_PATH = DATA_DIR / "worklist.json"      # output of the scheduled scan
+ACTION_LOG_PATH = DATA_DIR / "action_log.json"  # who we acted on, and who was held back
 
 # --- point-in-time prediction setup -------------------------------------------
 # At a cutoff time T the model sees ONLY data from before T and predicts whether

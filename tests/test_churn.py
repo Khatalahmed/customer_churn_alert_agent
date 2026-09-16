@@ -219,6 +219,57 @@ def test_rubric_verdicts_do_not_drift():
         assert assess(facts)["risk_level"] == expected, label
 
 
+def test_promotion_never_overwrites_the_evaluated_model(tmp_path):
+    import joblib
+    from churn.config import MODEL_PATH
+    from churn.retrain import promote
+    before = MODEL_PATH.read_bytes()
+    out = tmp_path / "production.pkl"
+    info = promote(cutoffs=[70, 56, 42], path=out)
+    assert out.exists() and info["churn"] > 0
+    # the evaluated model is untouched, and production is flagged unsafe to report on
+    assert MODEL_PATH.read_bytes() == before
+    assert joblib.load(out)["evaluation_safe"] is False
+
+
+def test_control_group_is_random_and_reproducible():
+    from churn.outcomes import assign_control
+    ids = list(range(1, 21))
+    control = assign_control(ids, fraction=0.3, seed=42)
+    assert len(control) == 6                      # 30% held back
+    assert control == assign_control(ids, fraction=0.3, seed=42)   # reproducible
+    assert control != assign_control(ids, fraction=0.3, seed=7)    # not fixed
+    assert control < set(ids)
+
+
+def test_uplift_measures_what_happened(tmp_path):
+    from churn.outcomes import log_actions, measure_uplift
+    worklist = {"analysis_time": "2026-08-04 06:30:00", "customers": [
+        {"user_id": i, "churn_probability": 0.2, "expected_value": 10,
+         "intervention": "coupon"} for i in range(1, 21)]}
+    log = log_actions(worklist, path=tmp_path / "log.json", seed=42)
+    treated = {e["user_id"] for e in log["entries"] if e["group"] == "treated"}
+    control = {e["user_id"] for e in log["entries"] if e["group"] == "control"}
+    assert treated and control and not (treated & control)
+
+    # nobody churns in either group -> no uplift, and we say so
+    flat = measure_uplift(log, churned_ids=set())
+    assert flat["uplift"] == 0.0
+
+    # every control churns, no treated does -> the maximum possible uplift
+    perfect = measure_uplift(log, churned_ids=control)
+    assert perfect["uplift"] == 1.0
+    assert perfect["treated"]["churn_rate"] == 0.0
+    assert perfect["control"]["churn_rate"] == 1.0
+
+
+def test_horizon_gate_blocks_early_measurement(tmp_path):
+    from churn.outcomes import horizon_passed
+    log = {"analysis_time": "2026-08-04 06:30:00", "horizon_days": 14}
+    assert not horizon_passed(log, "2026-08-10 06:30:00")   # too early to know
+    assert horizon_passed(log, "2026-08-18 06:30:00")
+
+
 def test_api_serves_health_worklist_and_one_customer(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     import churn.memory as memory
