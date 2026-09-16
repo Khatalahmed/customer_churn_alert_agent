@@ -16,16 +16,16 @@ Built to prove a point: **measure everything, including the techniques that fail
 
 <table>
 <tr>
-<td align="center"><b>0.71</b><br><sub>ROC-AUC<br><i>out-of-time, 14 days ahead</i></sub></td>
-<td align="center"><b>0.20</b><br><sub>precision<br><i>agent verdicts</i></sub></td>
-<td align="center"><b>100%</b><br><sub>evidence<br><i>fidelity</i></sub></td>
-<td align="center"><b>~270k</b><br><sub>tokens<br><i>per scan</i></sub></td>
+<td align="center"><b>0.83</b><br><sub>ROC-AUC<br><i>out-of-time, 14 days ahead</i></sub></td>
+<td align="center"><b>9.5x</b><br><sub>better than random<br><i>@ top-15</i></sub></td>
+<td align="center"><b>100%*</b><br><sub>evidence<br><i>fidelity</i></sub></td>
+<td align="center"><b>~270k*</b><br><sub>tokens<br><i>per scan</i></sub></td>
 </tr>
 </table>
 
-<sub>AUC is reproducible and checked in CI. Agent metrics are from one live run on
-<code>gpt-6-astra</code> (Azure OpenAI) against the frozen dataset. See
-[Agent metrics](#agent-metrics).</sub>
+<sub>Model numbers are reproducible and checked in CI. *Agent numbers are from a live
+<code>gpt-6-astra</code> (Azure OpenAI) run on an <b>earlier, smaller dataset</b> — not re-run
+since. See [Agent metrics](#agent-metrics).</sub>
 
 </div>
 
@@ -48,18 +48,18 @@ Cheap ML scores everyone. Expensive AI investigates only the few that matter.
 
 | Stage | Engine | Cost | Covers |
 |---|---|---|---|
-| **1 · Predict** | XGBoost model | ~free | **every active** customer (~220) |
-| **2 · Investigate** | LLM deep agent + 3 sub-agents | ~270k tokens/scan | **top 15** by risk × value |
+| **1 · Predict** | XGBoost model | ~free | **every active** customer (~2,500) |
+| **2 · Investigate** | LLM deep agent + 3 sub-agents | ~270k tokens/scan | **top 15** by churn risk |
 
 The agent **checks** the model rather than trusting it: it downgrades a "high risk" flag when
-the tickets and reviews don't back it up. On the latest shortlist it dropped 5 of 15 customers
-to LOW — 4 rightly, 1 a real churner it talked itself out of (see
-[Agent metrics](#agent-metrics)).
+the tickets and reviews don't back it up. On its last run it dropped 5 of 15 customers to LOW —
+4 rightly, 1 a real churner it talked itself out of (see [Agent metrics](#agent-metrics); that
+run predates the current dataset).
 
 ```mermaid
 flowchart LR
-    A[SQLite DB<br/>300 customers] --> B[XGBoost<br/>point-in-time]
-    B --> C[rank by<br/>risk × value]
+    A[SQLite DB<br/>3,000 customers] --> B[XGBoost<br/>point-in-time]
+    B --> C[rank by<br/>churn risk]
     C --> D[Deep agent<br/>top-15]
     D --> E[ticket + review<br/>sub-agents]
     E --> F[verdict<br/>+ evidence]
@@ -71,7 +71,7 @@ flowchart LR
 
 ## What it produces
 
-One command → an evidence-backed retention worklist (real output, `gpt-6-astra`):
+One command → an evidence-backed retention worklist (real output, `gpt-6-astra`, earlier dataset):
 
 ```text
 [HIGH  ] user   6 Priya Nair    prob=0.91 -> retention call
@@ -95,8 +95,13 @@ Uplift method check: a hold-out test recovers the planted coupon effect (+31 pts
 
 ### Agent metrics
 
+> ⚠️ **These numbers are stale.** They come from a live run on the **previous, smaller
+> dataset** (300 customers, before the simulator learned to time churn from bad experiences).
+> The model numbers above have since been re-measured; the agent has not, because each run
+> costs a real LLM call. Re-run the three commands below to refresh them.
+
 Measured in one live run on **`gpt-6-astra` via Azure OpenAI** (Responses API, keyless
-Entra ID auth) against the frozen dataset, analysis time 2026-08-04:
+Entra ID auth), analysis time 2026-08-04:
 
 | Metric | Result |
 |---|---|
@@ -133,83 +138,109 @@ The uplift line is simulated from the answer key and *is* reproducible.
 
 ### Predicting the future is much harder than recognising the past
 
-The first version of the model labelled customers who had **already** stopped ordering and
-used their whole history — so it was *detecting* past churn, not warning about future churn.
-It is now built on **point-in-time snapshots**: at a cutoff date the model sees only data from
-before that date and predicts who stops being active in the **next 14 days**. It trains on
-three earlier snapshots and is tested on a later one it never saw.
+The first version labelled customers who had **already** stopped ordering and used their whole
+history — so it *detected* past churn rather than warning about it. It is now built on
+**point-in-time snapshots**: at a cutoff date the model sees only data from before that date
+and predicts who stops being active in the **next 14 days**. It trains on ten earlier
+snapshots and is tested on a later one it never saw.
 
 | | Detecting past churn (v1) | Predicting the next 14 days (now) |
 |---|---|---|
-| ROC-AUC | 0.73 (random split) | **0.71** out-of-time · 0.63 ± 0.08 grouped CV |
-| Churn rate in the scored group | 26% | 7.3% |
-| Precision of the top 15 by probability | ≈ 0.80 | **0.27** — 3.7× random |
-| Precision of the agent's shortlist (probability × value) | 0.80 | **0.20** — 2.8× random |
+| ROC-AUC | 0.73 (random split) | **0.83** out-of-time · 0.79 ± 0.03 grouped CV |
+| Churn rate in the scored group | 26% | 1.4% |
+| Precision of the top 15 | ≈ 0.80 | **0.13** — but **9.5× random** |
+
+The precision *looks* worse because the question got much harder: only 35 of 2,487 active
+customers churn in a given fortnight, so picking 15 at random catches 0.2 of them.
 
 ![Precision at top 15 vs random](docs/img/precision_at_15.png)
 
-Real early warning is clearly better than random — but only 3–4 of the 15 highest-risk
-customers actually churn. A test guarantees the setup: deleting every row dated after the
-cutoff changes **no** feature value, and each churn event is labelled exactly once.
+A test guarantees the setup: deleting every row dated after the cutoff changes **no** feature
+value, and each churn event is labelled exactly once.
 
 ### Does the ML actually beat a simple rule?
 
 "We used XGBoost" is not a result. `churn.baselines` scores the same held-out snapshot with
 the things a team would try first:
 
-| Method | AUC | Precision@15 | Recall@15 | Lift |
-|---|---|---|---|---|
-| pick at random | 0.50 | 0.07 | 0.07 | 1.0x |
-| dormancy rule (days since last order) | 0.58 | 0.07 | 0.06 | 0.9x |
-| login drop (prev 14d − last 14d) | 0.57 | 0.20 | 0.19 | 2.8x |
-| logistic regression | 0.64 | **0.33** | 0.31 | 4.6x |
-| XGBoost (this project) | **0.71** | 0.27 | 0.25 | 3.7x |
+| Method | AUC | Precision@15 | Lift |
+|---|---|---|---|
+| pick at random | 0.50 | 0.01 | 1.0x |
+| dormancy rule (days since last order) | 0.38 | 0.00 | 0.0x |
+| login drop (prev 14d − last 14d) | 0.40 | 0.00 | 0.0x |
+| logistic regression | **0.83** | 0.07 | 4.7x |
+| XGBoost (this project) | **0.83** | **0.13** | **9.5x** |
 
-The classic **"no orders in 14 days" flag** picks 29 customers and gets 3 right — precision
-0.10, barely above random.
+The classic **"no orders in 14 days" flag** picks 353 customers and catches **zero** of the 35
+churners. In this world going quiet mostly means a loyal low-frequency buyer; churn is driven
+by bad *experience*, not by silence — which is why both quiet-customer rules score **worse
+than random**.
 
-**But one snapshot has 16 churners, so one customer moves precision@15 by 7 points.** Repeating
-the comparison at every cutoff (train on everything earlier) is less flattering:
+One snapshot is noisy, so the same comparison runs at all 10 cutoffs (train on everything
+earlier):
 
-| Method | mean precision@15 | mean AUC |
+| Method | mean AUC | mean precision@15 |
 |---|---|---|
-| XGBoost | 0.16 | 0.60 |
-| login drop rule | 0.16 | 0.54 |
-| logistic regression | 0.13 | 0.60 |
-| dormancy rule | 0.09 | 0.53 |
+| XGBoost | 0.76 | **0.12** (5.9× random) |
+| logistic regression | **0.77** | 0.10 |
+| login drop rule | 0.40 | 0.04 |
+| dormancy rule | 0.41 | 0.01 |
 
-**Honest conclusion:** XGBoost is level with logistic regression and, at the top of the
-ranking, level with a two-line login rule. It pulls ahead only on the last snapshot, the one
-with the most training data (precision 0.27 vs 0.20, AUC 0.71 vs 0.57) — consistent with a
-model that is data-hungry and currently data-starved. On 38 training churn events, the
-gradient boosting is not yet earning its complexity.
+**Honest conclusion:** XGBoost and logistic regression rank equally well overall; XGBoost is
+modestly better at the top of the list, which is the part the agent consumes. Both beat the
+rules decisively.
+
+### How good could *any* model be here?
+
+Giving a model the simulator's **hidden** variables — each customer's true dissatisfaction
+drivers and their exact accumulated frustration — sets the ceiling:
+
+| | mean AUC | mean precision@15 |
+|---|---|---|
+| our features | 0.76 | 0.12 |
+| oracle (hidden drivers) | 0.89 | **0.21** |
+
+So precision@15 is near its limit: the quit itself is a dice roll triggered by events that
+happen *after* the cutoff, and nothing observable can anticipate those. Ranking still has room.
+
+### Things I measured that did **not** work
+
+| Tried | Result |
+|---|---|
+| Rank the shortlist by risk × order value | **Cost 40% of precision** (0.073 vs 0.120): order value carries no churn signal. Risk now picks the 15; value only orders them. |
+| Recent-pain features (recent cancellations, fresh unresolved tickets, low reviews) | AUC 0.69 → 0.67. The lifetime rates already carry it. |
+| Smoothed rates (shrink toward the average when evidence is thin) | AUC up, top-15 precision down — not worth it |
+| Deeper trees (depth 5) | precision@15 halved: textbook overfitting on 400 churn events |
+| 28-day horizon ("churns this month") | lift halved; the frustration signal fades after ~2 weeks |
+| 365-day history per customer | AUC 0.73 → 0.78, but top-15 lift 6.2× → 4.0× |
+| More customers (1,500 → 3,000) | **Kept**: AUC 0.73 → 0.76, precision@50 4.4× → 5.2× |
+| Exposure counts (orders/tickets/reviews) | **Kept**: AUC 0.69 → 0.73, and steadier (CV ±0.054 → ±0.027) |
 
 ### Per archetype (held-out snapshot)
 
 The simulator plants five customer types: two really churn, two are **traps** that only
 *look* like churners (a vacationer goes quiet, a loyal bulk-buyer orders rarely).
 
-| Archetype | Active | Churn in 14 days | Flagged churners | False alarms | In top 15 |
-|---|---|---|---|---|---|
-| cliff-dropper | 10 | 10 | 1 / 10 | – | 2 |
-| gradual-fader | 6 | 6 | 2 / 6 | – | 2 |
-| vacationer (trap) | 22 | 0 | – | 2 / 22 (9%) | 2 |
-| loyal bulk-buyer (trap) | 22 | 0 | – | 2 / 22 (9%) | 2 |
-| regular | 160 | 0 | – | 6 / 160 (4%) | 7 |
+| Archetype | Active | Churn in 14 days | Flagged churners | False alarms |
+|---|---|---|---|---|
+| cliff-dropper | 18 | 18 | 7 / 18 | – |
+| gradual-fader | 17 | 17 | 8 / 17 | – |
+| vacationer (trap) | 238 | 0 | – | 32 / 238 (13%) |
+| loyal bulk-buyer (trap) | 211 | 0 | – | 12 / 211 (6%) |
+| regular | 2003 | 0 | – | 319 / 2003 (16%) |
 
-- **Cliff-droppers give almost no warning** — they stop abruptly, with no drop in activity
-  beforehand. Faders taper first, so they are easier to see coming.
-- **Traps are flagged about twice as often as regular customers** (9% vs 4%).
-- Counts are small (16 churners in one snapshot): read these as directions, not rates.
+- **The traps are no longer the weak spot.** Loyal bulk-buyers (6%) and vacationers (13%) are
+  flagged *less* than regular customers (16%) — the model reads bad experience, not silence.
+- **Gradual faders are caught more often than cliff-droppers** (8/17 vs 7/18): faders taper
+  first, while cliff-droppers stop abruptly with no warning in the data.
 
 ### What the model relies on
 
 ![XGBoost feature importance](docs/img/feature_importance.png)
 
-Experience-quality rates (tickets per order, unresolved-ticket rate, cancellation rate) still
-lead. Recent engagement — logins and orders in the last weeks, days since the last one — now
-contributes too. In v1 those features would have leaked the label; with a future label they
-are exactly the early-warning signals a retention team would see.
+Unresolved-ticket rate and recent logins lead, with `total_orders` close behind — the model
+uses it to judge *how much to trust* each rate: 1 cancellation in 4 orders is a guess, 10 in
+40 is a fact. Adding those exposure counts was the single change that helped most.
 
 <sub>*Numbers are exactly reproducible: the simulator uses a fixed seed and a frozen reference
 time (2026-09-01 12:00 IST) stored in the database, so every regeneration gives the same data
@@ -223,9 +254,11 @@ Every decision below was **measured, not assumed**:
 
 | Decision | Why — with the evidence |
 |---|---|
-| ⏳ **Point-in-time labels** | v1 labelled customers who had *already* left, so recency features faked ~0.99 AUC and even the "honest" 0.73 model was detecting the past. Now features use only data before a cutoff and the label is churn in the *next* 14 days, tested on a later snapshot: AUC **0.71**, precision@15 **0.27**. Weaker — and true. |
+| ⏳ **Point-in-time labels** | v1 labelled customers who had *already* left, so recency features faked ~0.99 AUC and even the "honest" 0.73 model was detecting the past. Now features use only data before a cutoff and the label is churn in the *next* 14 days, tested on a later snapshot: AUC **0.83**, **9.5×** better than random at top-15. |
+| 🎲 **A simulator that times churn** | Churn used to happen on a random date, so *who* was at risk was learnable but *when* was a coin flip. Customers now quit a few days after a run of bad experiences (measured: 2.25 bad events in the fortnight before quitting vs 0.93 normally) — cause before effect, which is what early warning needs. |
+| 🎯 **Risk picks, value orders** | Ranking the shortlist by risk × order value cost **40%** of its precision, because order value carries no churn signal. Risk now chooses the 15; value only decides who gets called first. |
 | 🔬 **SHAP-tested features** | (v1) Dropped `tenure_days` (removing it held AUC → overfit noise); kept `avg_order_value` (removing it dropped AUC 0.73→0.66 → real signal). |
-| ⚖️ **Rates, not counts** | Raw ticket count was *reversed* — churned users left early, so had *fewer* events. Rates kill the confound. |
+| ⚖️ **Rates, plus exposure** | Raw counts alone were *reversed* (churned users left early, so had fewer events), so the features are rates. But rates from 4 orders are guesses: adding the counts back as *exposure* let the model judge which rates to trust — AUC 0.69 → 0.73. |
 | ❌ **A critic agent I removed** | Added a skeptical reviewer, **measured it, and it hurt** — it downgraded real churners on an already-clean shortlist. Kept as a documented negative result. |
 | 🔁 **Provider = config** | One factory swaps Vertex AI / Groq / Gemini via an env var. (Found Groq's Llama-70B emits tool calls the harness rejects; Gemini doesn't.) |
 | 🔒 **Least-privilege + PII** | Read-only DB; tools never return phone/email; a redaction middleware scrubs any leak before the LLM. |
@@ -255,7 +288,7 @@ churn/                     # source package
 ├── quick_commerce_sim.py  #   synthetic data (causal churn + archetypes) + answer key
 ├── features.py            #   point-in-time snapshots + future (14-day) labels
 ├── train_model.py         #   XGBoost, grouped CV + out-of-time test
-├── scoring.py             #   risk × value priority tool
+├── scoring.py             #   shortlist by churn risk, ordered by value at risk
 ├── main.py                #   the deep agent (3 sub-agents)
 ├── eval.py / verifier.py  #   precision-recall + evidence fact-checking
 ├── explain.py             #   SHAP
@@ -303,7 +336,8 @@ docker build -t churn-agent . && docker run --rm churn-agent uv run python -m ch
 
 - **Synthetic data** — no real users. Results are framed as engineering + eval quality, never business impact.
 - **Frozen clock** — the data lives at a fixed reference time (stored in the DB, used by every time-window query) so results are reproducible. `quick_commerce_sim init --now wallclock` restores live timing, at the cost of reproducibility.
-- **Small sample** — 38 churn events to train on and 16 in the test snapshot, so AUC swings between 0.49 and 0.73 across CV folds. Treat every number as a direction, not a precise rate.
+- **Rare events** — 473 churners across 3,000 customers, but only ~35 in any single fortnight, so precision@15 moves by 7 points per customer. Walk-forward means over 10 cutoffs are the trustworthy numbers; a single snapshot is not.
+- **A measured ceiling** — a model given the simulator's hidden variables reaches precision@15 of 0.21; ours is 0.12. Most of the remaining gap is irreducible: the quit is triggered by events that happen after the cutoff.
 - **Evaluated in the past** — the pipeline runs "as of" the test cutoff (2026-08-04) so its 14-day outcome can be checked. `CHURN_AS_OF=reference` scores the latest data instead, where no outcome is known yet.
 - **Not million-scale** — per-customer LLM investigation suits top-N triage; the ML layer keeps the agent's workload bounded.
 

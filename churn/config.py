@@ -26,9 +26,14 @@ REPORT_PATH = DATA_DIR / "retention_report.md"
 # --- point-in-time prediction setup -------------------------------------------
 # At a cutoff time T the model sees ONLY data from before T and predicts whether
 # a currently active customer stops being active in the next HORIZON_DAYS.
+# 14 days, not 28: the bad-experience signal fades after about a fortnight, so a
+# month-ahead question includes churns whose trigger has not happened yet (measured:
+# lift over random halves, and the model loses its edge over logistic regression).
 HORIZON_DAYS = 14
 ACTIVE_WINDOW_DAYS = 28            # "active at T" = any login in the 28 days before T
-TRAIN_CUTOFFS_DAYS = (70, 56, 42)  # training snapshots, in days before the reference time
+CUTOFF_STEP_DAYS = HORIZON_DAYS    # snapshots spaced by the horizon: no churn counted twice
+# training snapshots, in days before the reference time (oldest first)
+TRAIN_CUTOFFS_DAYS = tuple(range(168, 41, -CUTOFF_STEP_DAYS))
 TEST_CUTOFF_DAYS = 28              # held-out snapshot: its labels start where training's end
 
 

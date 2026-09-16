@@ -39,11 +39,20 @@ from .config import DB_PATH, TRUTH_PATH, reference_now
 # Config
 # --------------------------------------------------------------------------- #
 DEFAULT_DB_PATH = DB_PATH
-DEFAULT_HISTORY_DAYS = 120          # >= 100 as required
-NUM_CUSTOMERS = 300                 # CHANGED: was 40 -- bigger set for real ML
+DEFAULT_HISTORY_DAYS = 240          # long enough for many point-in-time cutoffs
+NUM_CUSTOMERS = 3000                # measured: doubling this lifted AUC .73 -> .76
 CHURN_FRACTION = 0.25               # (kept for reference, no longer used directly)
-CHURN_MIN_WEEKS = 2                 # churned users inactive for >= 2 weeks
-CHURN_MAX_WEEKS = 8
+# A churned customer stops at a date drawn from the WHOLE history window, not
+# just the final weeks: every cutoff date then has churn events to learn from.
+MIN_DAYS_BEFORE_CHURN = 21          # they stay at least 3 weeks after signing up
+MIN_QUIET_DAYS = 14                 # ...and are quiet >= 2 weeks by the reference time
+# A churn-prone customer quits a few days after a RUN OF BAD EXPERIENCES, so the
+# cause sits in the data before the effect - that is what early warning needs.
+PAIN_WINDOW_DAYS = 14               # bad experiences still sting for two weeks
+MIN_PAIN_TO_QUIT = 2.0              # below this they grumble but stay
+QUIT_HAZARD_PER_PAIN = 0.05         # daily quit chance = hazard x recent pain
+MAX_DAILY_QUIT_P = 0.30
+FADE_SENSITIVITY = 0.20             # gradual faders order less as pain builds
 CHURN_THRESHOLD = 0.62              # NEW: unhappiness above this -> churn
 # NEW: churn ARCHETYPES (typed churners + false-positive traps)
 FADER_FRACTION = 0.45              # of churned, this share fade slowly (rest cliff-drop)
@@ -353,20 +362,18 @@ def seed_customers(conn: sqlite3.Connection, n: int, history_days: int, now: dat
         churned = churn_roll > CHURN_THRESHOLD
         freq = random.choice([0.5, 1, 1.5, 2, 3, 4])   # orders/week
         fade_start = vac_start = vac_end = None
-        if churned:
-            weeks_quiet = random.randint(CHURN_MIN_WEEKS, CHURN_MAX_WEEKS)
-            active_until = now - timedelta(weeks=weeks_quiet)
-            status = "ACTIVE"  # still active account, just dormant
-            # churned users are a sudden CLIFF-DROPPER or a slow GRADUAL-FADER
-            if random.random() < FADER_FRACTION:
-                archetype = "gradual_fader"
-                fade_start = active_until - timedelta(weeks=6)  # taper before silence
-            else:
-                archetype = "cliff_dropper"
+        # Unhappiness decides WHO is at risk; the backfill decides WHEN (and
+        # whether) they actually quit, from the bad experiences they live through.
+        churn_prone = churned
+        churned = False                  # settled during backfill_history()
+        active_until = now
+        fade_style = churn_prone and random.random() < FADER_FRACTION
+        archetype = "regular_active"
+        if churn_prone:
+            status = "ACTIVE"            # an active account today, just at risk
         else:
-            active_until = now
             status = random.choices(["ACTIVE", "SUSPENDED"], weights=[0.95, 0.05])[0]
-            # some NON-churned customers are false-positive TRAPS
+            # some customers are false-positive TRAPS
             roll = random.random()
             if roll < VACATIONER_FRACTION:
                 archetype = "vacationer"        # a recent break, but they came back
@@ -375,8 +382,6 @@ def seed_customers(conn: sqlite3.Connection, n: int, history_days: int, now: dat
             elif roll < VACATIONER_FRACTION + LOYAL_FRACTION:
                 archetype = "loyal_bulk_buyer"  # orders rarely but is NOT leaving
                 freq = 0.5                       # low frequency -> looks dormant
-            else:
-                archetype = "regular_active"
 
         cur.execute(
             """INSERT INTO users (full_name, email, phone_number, password_hash,
@@ -410,6 +415,9 @@ def seed_customers(conn: sqlite3.Connection, n: int, history_days: int, now: dat
             "pickiness": pickiness,
             # NEW: archetype + its timing knobs (used by backfill + eval)
             "archetype": archetype,
+            "churn_prone": churn_prone,     # at risk; may or may not actually quit
+            "fade_style": fade_style,       # if they quit, do they taper first?
+            "pain": [],                     # recent bad experiences (day, weight)
             "fade_start": fade_start,
             "vac_start": vac_start,
             "vac_end": vac_end,
@@ -513,7 +521,7 @@ def gen_ticket(conn, user, order_id, agent_ids, day):
         (user["user_id"], order_id, agent, subject, desc, cat, priority, status, notes,
          iso(created), iso(updated), iso(resolved_at) if resolved_at else None),
     )
-    return cur.lastrowid
+    return cur.lastrowid, status
 
 def gen_review(conn, user, product_id, order_id, day):
     cur = conn.cursor()
@@ -532,13 +540,21 @@ def gen_review(conn, user, product_id, order_id, day):
             (user["user_id"], product_id, order_id, rating, title, text,
              1, random.randint(0, 20), iso(created)),
         )
+        return rating
     except sqlite3.IntegrityError:
-        pass  # duplicate (user, product, order) -- skip, UNIQUE constraint
+        return None  # duplicate (user, product, order) -- skip, UNIQUE constraint
 
 # --------------------------------------------------------------------------- #
 # Backfill historical data
 # --------------------------------------------------------------------------- #
 PRODUCT_PRICE_BY_ID: dict[int, float] = {}
+
+
+def recent_pain(user, day) -> float:
+    """Weighted bad experiences in the last PAIN_WINDOW_DAYS (drops older ones)."""
+    cutoff = day - timedelta(days=PAIN_WINDOW_DAYS)
+    user["pain"] = [(d, w) for d, w in user["pain"] if d >= cutoff]
+    return sum(w for _, w in user["pain"])
 
 def backfill_history(conn, customers, product_ids, agent_ids, history_days, now):
     """
@@ -560,12 +576,11 @@ def backfill_history(conn, customers, product_ids, agent_ids, history_days, now)
             # NEW: vacationer takes a break in the middle, then returns
             if user.get("vac_start") and user["vac_start"] <= day <= user["vac_end"]:
                 continue
+            pain = recent_pain(user, day)
             p_active = min(0.95, (user["freq"] / 7.0) * weekend_boost)
-            # NEW: gradual fader's activity decays to ~0 as they approach going silent
-            if user.get("fade_start") and day >= user["fade_start"]:
-                span = max((user["active_until"] - user["fade_start"]).days, 1)
-                elapsed = (day - user["fade_start"]).days
-                p_active *= max(0.0, 1 - elapsed / span)
+            # a gradual fader orders less and less as bad experiences pile up
+            if user["fade_style"]:
+                p_active *= max(0.15, 1 - FADE_SENSITIVITY * pain)
             if random.random() > p_active:
                 continue
             made_order = random.random() < 0.7
@@ -574,18 +589,37 @@ def backfill_history(conn, customers, product_ids, agent_ids, history_days, now)
             if made_order:
                 order_id, status, items, placed = gen_order(conn, user, product_ids, day)
                 total_orders += 1
+                if status == "CANCELLED":
+                    user["pain"].append((day, 1.0))
                 # CHANGED: unhappy (high support_pain) customers raise more tickets
                 base_ticket_p = 0.18 if status != "DELIVERED" else 0.05
                 p_ticket = base_ticket_p + 0.15 * user.get("support_pain", 0.0)
                 if random.random() < p_ticket:
-                    gen_ticket(conn, user, order_id, agent_ids, day + timedelta(days=random.randint(0, 1)))
+                    _, t_status = gen_ticket(conn, user, order_id, agent_ids,
+                                             day + timedelta(days=random.randint(0, 1)))
                     total_tickets += 1
+                    if t_status in ("OPEN", "IN_PROGRESS", "WAITING_ON_CUSTOMER"):
+                        user["pain"].append((day, 1.5))   # an unfixed problem stings most
                 if status == "DELIVERED" and random.random() < 0.35:
                     review_day = day + timedelta(days=random.randint(0, 2))
                     if review_day <= now:
                         prod = random.choice(items)
-                        gen_review(conn, user, prod, order_id, review_day)
+                        rating = gen_review(conn, user, prod, order_id, review_day)
                         total_reviews += 1
+                        if rating is not None and rating <= 2:
+                            user["pain"].append((day, 1.0))
+
+            # --- do today's bad experiences push an at-risk customer over? ---
+            if user["churn_prone"] and not user["churned"]:
+                pain = recent_pain(user, day)
+                can_quit = (day >= user["signup"] + timedelta(days=MIN_DAYS_BEFORE_CHURN)
+                            and day <= now - timedelta(days=MIN_QUIET_DAYS))
+                if can_quit and pain >= MIN_PAIN_TO_QUIT and random.random() < min(
+                        MAX_DAILY_QUIT_P, QUIT_HAZARD_PER_PAIN * pain):
+                    user["churned"] = True
+                    user["active_until"] = day          # last day they were ever active
+                    user["archetype"] = ("gradual_fader" if user["fade_style"]
+                                         else "cliff_dropper")
         if day_offset % 20 == 0:
             conn.commit()
     conn.commit()

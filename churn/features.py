@@ -40,6 +40,11 @@ FEATURE_COLS = [
     "days_since_last_login",
     "orders_last_28d",
     "days_since_last_order",
+    # how much evidence each rate above is based on: 1 cancellation out of 4 orders
+    # is a guess, 10 out of 40 is a fact - the model cannot tell without these
+    "total_orders",
+    "total_tickets",
+    "total_reviews",
 ]
 
 

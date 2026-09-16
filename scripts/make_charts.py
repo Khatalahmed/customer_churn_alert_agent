@@ -52,13 +52,14 @@ plt.close(fig)
 #    Values from churn.train_model / the precision@k check and churn.eval.
 #    AGENT_PRECISION is from a live LLM run (None = not measured -> bar omitted).
 # --------------------------------------------------------------------------- #
-BASE_RATE = 0.073
-AGENT_PRECISION = 0.20
+BASE_RATE = 0.014
+AGENT_PRECISION = None      # stale: the last agent run predates this dataset
 
 bars_spec = [
     ("pick at\nrandom", BASE_RATE, "#94a3b8"),
-    ("ML shortlist\n(risk x value)", 0.20, "#4f46e5"),
-    ("ML top 15\n(by probability)", 0.27, "#4f46e5"),
+    ('"no orders\nin 14 days"', 0.00, "#dc2626"),
+    ("logistic\nregression", 0.07, "#4f46e5"),
+    ("XGBoost\n(this project)", 0.13, "#16a34a"),
 ]
 if AGENT_PRECISION is not None:
     bars_spec.append(("agent verdicts\n(HIGH + MEDIUM)", AGENT_PRECISION, "#16a34a"))
@@ -68,7 +69,7 @@ labels = [b[0] for b in bars_spec]
 values = [b[1] * 100 for b in bars_spec]
 bars = ax.bar(labels, values, color=[b[2] for b in bars_spec], width=0.6)
 ax.set_ylabel("% that really churned")
-ax.set_ylim(0, 100)
+ax.set_ylim(0, 30)
 ax.set_title("Who actually churns in the next 14 days?  (held-out snapshot)",
              fontweight="bold", loc="left")
 for b, v in zip(bars, values):
@@ -77,7 +78,7 @@ for b, v in zip(bars, values):
 for s in ("top", "right"):
     ax.spines[s].set_visible(False)
 fig.text(0.01, -0.02,
-         "220 active customers, 16 churn in the next 14 days  •  model never saw this snapshot",
+         "2,487 active customers, 35 churn in the next 14 days  -  model never saw this snapshot",
          fontsize=9, color="#6b7280")
 fig.tight_layout()
 fig.savefig("docs/img/precision_at_15.png", dpi=140, bbox_inches="tight")

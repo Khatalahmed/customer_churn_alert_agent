@@ -21,7 +21,7 @@ from churn.drift import psi
 def test_features_shape():
     df, cols = build_features()
     assert cols == FEATURE_COLS
-    assert 0 < len(df) < 300                     # only customers active at the analysis time
+    assert 0 < len(df) < 3000                    # only customers active at the analysis time
     assert df["user_id"].is_unique
     assert "churned" not in df.columns          # scoring must not need the answer key
     labelled = add_labels(df)
@@ -96,6 +96,11 @@ def test_churn_candidates_tool_returns_ranked_json(tmp_path, monkeypatch):
     monkeypatch.setattr(memory, "STORE_PATH", tmp_path / "contacted.json")
     data = json.loads(get_churn_candidates.invoke({"top_n": 5}))
     assert len(data) == 5
+    # the shortlist is CHOSEN by churn risk...
+    from churn.scoring import score_customers
+    riskiest = set(score_customers().nlargest(5, "churn_probability")["user_id"])
+    assert {c["user_id"] for c in data} == riskiest
+    # ...and ORDERED by value at risk, so the team calls the biggest loss first
     scores = [c["priority_score"] for c in data]
     assert scores == sorted(scores, reverse=True)
 
@@ -301,7 +306,7 @@ def test_no_timestamps_after_reference_time():
     conn.close()
 
 
-def test_simulator_is_reproducible(tmp_path):
+def test_simulator_is_reproducible(tmp_path, monkeypatch):
     # same seed + frozen reference time -> identical data on every run
     import sqlite3
     import churn.quick_commerce_sim as sim
@@ -314,6 +319,7 @@ def test_simulator_is_reproducible(tmp_path):
         conn.close()
         return rows
 
+    monkeypatch.setattr(sim, "NUM_CUSTOMERS", 200)   # small: this test builds twice
     for name in ["a", "b"]:
         sim.cmd_init(tmp_path / f"{name}.db", sim.DEFAULT_HISTORY_DAYS,
                      truth_path=tmp_path / f"{name}.json")

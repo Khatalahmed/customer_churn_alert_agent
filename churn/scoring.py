@@ -1,17 +1,19 @@
 """
 scoring.py
 
-WHAT : Loads the trained XGBoost model and scores every customer who is active
-       at the analysis time for churn in the next 14 days, then combines risk
-       with customer value to build a priority list. Exposes it as a tool the
-       agent calls to pick who to investigate.
+WHAT : Loads the trained XGBoost model, scores every customer active at the
+       analysis time for churn in the next 14 days, and returns the riskiest
+       few for the agent to investigate.
 WHY  : The model is cheap and scores every active customer. The agent is slow
-       and costly, so it should only investigate the top-priority ones.
-       Priority = churn risk x customer value, so we focus on the valuable
-       customers we are about to lose.
-FLOW : point-in-time features at the analysis time -> model predicts churn
-       probability -> priority = probability x average order value -> drop
-       recently contacted -> rank -> return the top N with their key numbers.
+       and costly, so it should only investigate the top slice.
+LOGIC: WHO is chosen by churn risk alone. We used to rank by risk x order
+       value; measured over 10 snapshots that cost ~40% of the shortlist's
+       precision (0.073 vs 0.120), because order value carries no churn signal
+       here - value only decides the ORDER of the chosen few, so the team
+       calls the biggest loss first.
+FLOW : point-in-time features -> churn probability -> drop recently contacted
+       -> take the top N by risk -> order by value at risk -> return with
+       their key numbers.
 """
 import json
 
@@ -60,11 +62,14 @@ def score_customers(as_of=None) -> pd.DataFrame:
 
     df, _ = build_features(as_of=as_of)
     df["churn_probability"] = model.predict_proba(df[cols])[:, 1]
-    # priority = "expected value at risk" = how likely to leave x how valuable
+    # value at risk = how likely to leave x how valuable. NOT used to choose who to
+    # investigate: measured over 10 snapshots, ranking by probability x value costs
+    # ~40% of shortlist precision (0.073 vs 0.120), because order value carries no
+    # churn signal here. It orders the shortlist once risk has chosen it.
     df["priority_score"] = df["churn_probability"] * df["avg_order_value"]
     df = df.merge(names, on="user_id", how="left")
 
-    return df.sort_values("priority_score", ascending=False)
+    return df.sort_values("churn_probability", ascending=False)
 
 
 @tool
@@ -72,11 +77,11 @@ def get_churn_candidates(top_n: int = 15) -> str:
     """Get the top churn-risk customers to investigate, ranked by priority.
 
     The ML model predicts each active customer's chance of churning in the
-    next 14 days. Priority combines that probability with the customer's
-    value (average order value), so high-value customers at risk come first.
-    Call this FIRST to decide which customers to investigate. For each
-    customer it also returns the login trend and total orders, all as of the
-    analysis time.
+    next 14 days. The riskiest customers are shortlisted, then ordered by
+    value at risk (churn probability x average order value) so the most
+    valuable at-risk customer comes first. Call this FIRST to decide which
+    customers to investigate. For each customer it also returns the login
+    trend and total orders, all as of the analysis time.
 
     Args:
         top_n: how many top-priority customers to return (default 15).
@@ -89,7 +94,9 @@ def get_churn_candidates(top_n: int = 15) -> str:
     # skip customers we already contacted in the last 30 days (no nagging)
     skip = recently_contacted_ids(days=30)
     df = df[~df["user_id"].isin(skip)]
-    df = df.head(top_n)
+    # WHO to investigate: highest churn risk. Then order that shortlist by value at
+    # risk, so the team calls the most valuable at-risk customer first.
+    df = df.nlargest(top_n, "churn_probability").sort_values("priority_score", ascending=False)
 
     result = []
     for _, r in df.iterrows():

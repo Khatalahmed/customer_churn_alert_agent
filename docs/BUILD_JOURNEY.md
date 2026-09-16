@@ -199,9 +199,36 @@ Recency features stopped being leakage and became real signals — but cliff-dro
 
 ---
 
+## STAGE 14 - A simulator that can be predicted, and a tuning round that mostly said "no"
+
+**The problem:** with churn dates drawn at random, dissatisfaction decided *whether* a customer left but nothing decided *when*. The model ranked unhappy customers correctly, yet which fortnight they quit was a coin flip - precision@15 sat at the base rate.
+
+**The fix (simulator):** during the day-by-day backfill a churn-prone customer now quits a few days after a **run of bad experiences** (cancelled orders, unresolved tickets, 1-2 star reviews), and gradual faders slow down as that frustration builds. Measured: 2.25 bad events in the fortnight before quitting vs 0.93 in a normal fortnight - cause before effect. Also scaled to 3,000 customers over 240 days (473 churners), after measuring that it helped.
+
+**Result:** AUC 0.83 out-of-time (0.79 +/- 0.03 CV), precision@15 9.5x random, and the traps stopped being the weak spot - loyal bulk-buyers are now flagged *less* often than regular customers.
+
+**The tuning round - what did NOT work, all measured over 10 cutoffs:**
+
+| Tried | Result |
+|---|---|
+| risk x order value ranking (the original design!) | cost 40% of shortlist precision - order value carries no churn signal |
+| recent-pain features | AUC 0.69 -> 0.67 |
+| smoothed rates | AUC up, top-15 down |
+| depth 5 | precision@15 halved (overfitting) |
+| 28-day horizon | lift halved - the frustration signal fades after ~2 weeks |
+| 365-day history | AUC up, top-15 lift 6.2x -> 4.0x |
+| exposure counts | **kept**: AUC 0.69 -> 0.73, CV spread halved |
+| 3,000 customers | **kept**: AUC 0.73 -> 0.76 |
+
+**The ceiling:** a model handed the simulator's hidden variables reaches precision@15 of 0.21 against our 0.12 - so the top of the list is near its limit, because the quit is triggered by events that happen after the cutoff.
+
+**Lesson:** *Measure the ranking you actually ship. The "risk x value" priority score sounded obviously right, shipped for weeks, and was quietly throwing away 40% of the shortlist's precision.*
+
+---
+
 ## The whole project in one line
 
-> An **XGBoost model** ranks customers by *risk × value*; a **deep agent** with
+> An **XGBoost model** ranks customers by *churn risk*; a **deep agent** with
 > three sub-agents investigates the top slice and **verifies every fact against
 > the database**; the output is a prioritised retention report — and **every
 > claim is measured**, including the techniques that didn't work.
