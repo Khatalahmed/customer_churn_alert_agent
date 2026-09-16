@@ -248,6 +248,44 @@ A deliberate pass over the weakest parts, each one measured before and after.
 
 **Lesson:** *Every improvement moved a number, and three of them moved it DOWN once measured honestly. The ones worth keeping were the ones that survived a comparison, not the ones that sounded good.*
 
+## STAGE 16 - Verifying the sentence, not just the schema
+
+The last honest gap in the README: `verifier.py` re-queried the six numbers the
+agent fills into its Pydantic schema, but nothing checked the `reason` it wrote -
+and the reason is the only part a human reads. Filling the schema correctly and
+then writing "three refund tickets remain unresolved" about a customer who has
+one are entirely compatible failures.
+
+`prose_eval.py` splits each reason into clauses and extracts typed claims:
+ticket counts and categories with their open/closed state, star ratings and
+ranges, what a complaint actually SAYS (stale, leaking, wrong item), login
+movements including the direction word, and absences ("there are no reviews").
+Each claim is re-queried against the database.
+
+**Why patterns and not a second LLM.** A model checking a model needs its own
+verifier; the regress has to stop at something deterministic. The cost is
+coverage - patterns only recognise claim types they were taught - so coverage is
+reported next to fidelity, and a clause nothing recognises counts as UNCHECKED,
+never as correct.
+
+**Result on the live run:** 81 claims extracted from 15 reasons, all supported -
+100% prose fidelity, 74% clause coverage. The uncovered quarter is rubric
+restatement ("Dissatisfaction: not established under the criteria"), which
+contains no factual claim to check.
+
+**Two things the build itself taught:**
+- The first version read polarity per CLAUSE, so "the resolved refund ticket and
+  open app-crash ticket do not qualify" was scored as an unresolved refund
+  ticket - a false alarm on correct prose. Claims are now bound to their own
+  comma-segment. A checker that cries wolf gets switched off.
+- A checker that only ever passes is worthless. Eight corrupted reasons - one per
+  claim type - are in the test suite, so the thing is proven able to fail.
+
+**Lesson:** *The structured half was the easy half. What nobody was checking was
+the part everybody reads.*
+
+---
+
 ---
 
 ## The whole project in one line

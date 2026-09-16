@@ -628,3 +628,70 @@ def test_pii_redaction():
     assert "9876543210" not in clean          # phone gone
     assert "sameer@example.com" not in clean   # email gone
     assert "[PHONE]" in clean and "[EMAIL]" in clean
+
+# A hand-built customer: three unresolved refund tickets (two waiting on the
+# customer), one closed delivery ticket, and a single 1-star review. Facts are
+# built by hand so the prose rules are tested, not the database.
+def _prose_facts():
+    return {
+        "tickets": [
+            {"category": "REFUND", "unresolved": True,
+             "text": "refund not received i was told a refund was issued",
+             "status": "in progress"},
+            {"category": "REFUND", "unresolved": True,
+             "text": "refund not received", "status": "waiting on customer"},
+            {"category": "REFUND", "unresolved": True,
+             "text": "refund not received", "status": "waiting on customer"},
+            {"category": "DELIVERY_DELAY", "unresolved": False,
+             "text": "delivery took too long", "status": "closed"},
+        ],
+        "reviews": [{"rating": 1, "text": "bad experience wrong item delivered"}],
+        "logins": {"prev": 0, "recent": 12},
+        "corpus": "refund not received delivery took too long wrong item delivered",
+    }
+
+
+def test_prose_accepts_a_reason_that_is_true():
+    from churn.prose_eval import check_prose
+    result = check_prose(
+        "Dissatisfaction: three refund tickets remain unresolved, including two "
+        "waiting on the customer; the delivery ticket is closed. A 1-star review "
+        "reports a wrong item. Disengagement: absent; logins rose from 0 to 12.",
+        _prose_facts())
+    assert [c for c in result["claims"] if not c["ok"]] == []
+    assert len(result["claims"]) >= 6      # it really did extract claims
+
+
+@pytest.mark.parametrize("kind,sentence", [
+    ("ticket_count", "Seven refund tickets remain unresolved."),
+    ("ticket_exists", "A payment ticket remains unresolved."),
+    ("ticket_exists", "The refund ticket is closed."),
+    ("review_rating", "A 5-star review reports a wrong item."),
+    ("topic", "The review reports a leaking packet."),
+    ("login_move", "Logins rose from 3 to 40."),
+    ("login_move", "Logins fell from 0 to 12."),
+    ("absence", "There are no reviews."),
+])
+def test_prose_catches_each_kind_of_false_claim(kind, sentence):
+    from churn.prose_eval import check_prose
+    bad = [c for c in check_prose(sentence, _prose_facts())["claims"] if not c["ok"]]
+    assert kind in [c["kind"] for c in bad], f"{sentence!r} was not caught"
+
+
+def test_prose_binds_each_claim_to_its_own_ticket_and_polarity():
+    # One clause, two tickets, opposite polarities, plus a category word that
+    # belongs to a review. Reading the clause as a whole gets all three wrong.
+    from churn.prose_eval import check_prose
+    result = check_prose(
+        "The refund tickets remain unresolved, the delivery ticket is closed, "
+        "and the 1-star review mentioning delivery does not qualify.",
+        _prose_facts())
+    assert [c for c in result["claims"] if not c["ok"]] == []
+
+
+def test_prose_counts_unchecked_clauses_instead_of_passing_them():
+    from churn.prose_eval import check_prose
+    result = check_prose("Dissatisfaction: not established under the criteria.",
+                         _prose_facts())
+    assert result["claims"] == []
+    assert result["unchecked_clauses"] == 1
