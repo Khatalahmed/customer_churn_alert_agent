@@ -254,13 +254,16 @@ def test_uplift_measures_what_happened(tmp_path):
 
     # nobody churns in either group -> no uplift, and we say so
     flat = measure_uplift(log, churned_ids=set())
-    assert flat["uplift"] == 0.0
+    assert flat["absolute_uplift_pp"] == 0.0
+    assert flat["relative_uplift"] is None      # no control churn to remove
 
     # every control churns, no treated does -> the maximum possible uplift
     perfect = measure_uplift(log, churned_ids=control)
-    assert perfect["uplift"] == 1.0
+    assert perfect["absolute_uplift_pp"] == 100.0    # percentage POINTS
+    assert perfect["relative_uplift"] == 1.0         # all would-be churn removed
     assert perfect["treated"]["churn_rate"] == 0.0
     assert perfect["control"]["churn_rate"] == 1.0
+    assert perfect["conclusive"], "a total separation must not read as noise"
 
 
 def test_horizon_gate_blocks_early_measurement(tmp_path):
@@ -751,3 +754,66 @@ def test_prose_does_not_invent_a_ticket_from_review_descriptors():
     invented = [c for c in result["claims"]
                 if c["kind"].startswith("ticket") and not c["ok"]]
     assert invented == [], f"invented a ticket from review text: {invented}"
+
+
+def test_absolute_and_relative_uplift_are_not_the_same_number():
+    # 10% -> 5% is 5 percentage points AND a 50% cut. Reporting one figure
+    # labelled "%" let the same result mean either.
+    from churn.outcomes import measure_uplift
+    log = {"analysis_time": "2026-08-04 06:30:00", "horizon_days": 14, "entries":
+           [{"user_id": i, "group": "control", "churn_probability": 0.1}
+            for i in range(100)]
+           + [{"user_id": 100 + i, "group": "treated", "churn_probability": 0.1}
+              for i in range(100)]}
+    churned = set(range(10)) | set(range(100, 105))     # 10/100 control, 5/100 treated
+    r = measure_uplift(log, churned)
+    assert r["absolute_uplift_pp"] == 5.0
+    assert r["relative_uplift"] == 0.5
+
+
+def test_significance_is_a_test_not_an_interval_overlap():
+    # 10/50 vs 2/50 is significant (Fisher p = 0.028), yet the two per-arm
+    # Wilson intervals still overlap - the old rule called this inconclusive.
+    from churn.outcomes import _fisher_exact_two_sided, _wilson_interval, measure_uplift
+    c_lo, c_hi = _wilson_interval(10, 50)
+    t_lo, t_hi = _wilson_interval(2, 50)
+    assert not (t_hi < c_lo or c_hi < t_lo), "this case must still overlap"
+    assert _fisher_exact_two_sided(10, 40, 2, 48) < 0.05
+
+    log = {"analysis_time": "2026-08-04 06:30:00", "horizon_days": 14, "entries":
+           [{"user_id": i, "group": "control", "churn_probability": 0.15} for i in range(50)]
+           + [{"user_id": 100 + i, "group": "treated", "churn_probability": 0.15}
+              for i in range(50)]}
+    r = measure_uplift(log, churned_ids=set(range(10)) | {100, 101})
+    assert r["conclusive"] and r["p_value"] < 0.05
+    lo, hi = r["difference_ci_pp"]
+    assert lo > 0, "the interval on the DIFFERENCE should exclude zero here"
+
+
+def test_fisher_matches_a_known_table():
+    # Fisher's original tea-tasting table: 3/4 vs 1/4, two-sided p = 0.4857
+    from churn.outcomes import _fisher_exact_two_sided
+    assert round(_fisher_exact_two_sided(3, 1, 1, 3), 4) == 0.4857
+    assert _fisher_exact_two_sided(0, 0, 0, 0) == 1.0
+
+
+def test_sample_size_states_alpha_and_power_and_scales():
+    from churn.outcomes import sample_size_per_arm
+    r = sample_size_per_arm(0.10, relative_cut=0.5)
+    assert r["alpha"] == 0.05 and r["power"] == 0.80
+    # textbook two-proportion formula: 10% vs 5%, 80% power -> ~435 per arm
+    assert 420 <= r["per_arm"] <= 450
+    # a smaller effect needs more customers; a rarer event needs more too
+    assert sample_size_per_arm(0.10, 0.25)["per_arm"] > r["per_arm"]
+    assert sample_size_per_arm(0.01, 0.5)["per_arm"] > r["per_arm"]
+    with pytest.raises(ValueError):
+        sample_size_per_arm(0.1, power=0.83)
+
+
+def test_planning_falls_back_to_predictions_when_the_control_is_empty():
+    from churn.outcomes import planning_base_rate
+    log = {"entries": [{"churn_probability": 0.14}, {"churn_probability": 0.10}]}
+    rate, basis = planning_base_rate(log, control_churned=0, control_n=4)
+    assert round(rate, 4) == 0.12 and "calibrated" in basis
+    rate, basis = planning_base_rate(log, control_churned=9, control_n=60)
+    assert rate == 0.15 and basis == "observed control churn rate"
