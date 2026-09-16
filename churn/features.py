@@ -25,6 +25,7 @@ import pandas as pd
 
 from .config import (ACTIVE_WINDOW_DAYS, DB_PATH, HORIZON_DAYS, TRUTH_PATH,
                      analysis_time, connect_readonly, cutoff_time)
+from .labels import active_customers
 
 FEATURE_COLS = [
     # experience quality - the cause of churn
@@ -58,15 +59,13 @@ def build_features(as_of=None, db_path=None):
     as_of = as_of or analysis_time(conn)
     p = {"t": as_of, "window": f"-{ACTIVE_WINDOW_DAYS} days"}
 
+    # "active at T" lives in labels.py, not in this query: it is a definition
+    # the whole project depends on, so it is written down once, in prose, with
+    # the measurement behind it.
     customers = pd.read_sql(
-        """SELECT u.user_id FROM users u
-           WHERE u.user_type = 'CUSTOMER' AND EXISTS (
-               SELECT 1 FROM auth_audit_log a
-               WHERE a.user_id = u.user_id AND a.event_type = 'LOGIN'
-                 AND a.event_timestamp >= datetime(:t, :window)
-                 AND a.event_timestamp < :t)""",
-        conn, params=p,
-    )
+        """SELECT user_id FROM users WHERE user_type = 'CUSTOMER'""", conn)
+    customers = customers[customers["user_id"].isin(
+        active_customers(conn, as_of, ACTIVE_WINDOW_DAYS))].reset_index(drop=True)
     orders = pd.read_sql(
         """SELECT user_id,
                   COUNT(*)                                   AS total_orders,

@@ -969,3 +969,65 @@ def test_prediction_drift_sees_what_features_can_hide():
     assert quiet["severity"] == "stable"
     moved = prediction_drift(rng.random(500) * 0.02, rng.random(500) * 0.2)
     assert moved["severity"] == "alert" and moved["mean_ratio"] > 5
+
+
+def _events_db(tmp_path, orders=(), logins=()):
+    import sqlite3
+    conn = sqlite3.connect(tmp_path / "e.db")
+    conn.execute("CREATE TABLE orders (user_id INT, placed_at TEXT)")
+    conn.execute("CREATE TABLE auth_audit_log (user_id INT, event_type TEXT, event_timestamp TEXT)")
+    conn.executemany("INSERT INTO orders VALUES (?,?)", orders)
+    conn.executemany("INSERT INTO auth_audit_log VALUES (?,'LOGIN',?)", logins)
+    conn.commit()
+    return conn
+
+
+def test_active_means_ordered_or_logged_in(tmp_path):
+    # A customer who ordered without logging in would have been invisible to
+    # the old login-only query, though ordering is the behaviour that matters.
+    from churn.labels import active_customers
+    conn = _events_db(tmp_path,
+                      orders=[(1, "2026-07-20 10:00:00")],       # ordered, no login
+                      logins=[(2, "2026-07-21 10:00:00"),        # logged in, no order
+                              (3, "2026-05-01 10:00:00")])       # too long ago
+    assert active_customers(conn, "2026-08-04 06:30:00") == {1, 2}
+
+
+def test_observable_churn_admits_when_it_has_not_waited_long_enough(tmp_path):
+    from churn.labels import observable_churn
+    conn = _events_db(tmp_path, logins=[(1, "2026-08-01 10:00:00")])
+    as_of = "2026-08-04 06:30:00"
+    early = observable_churn(conn, as_of, now="2026-08-20 00:00:00")
+    assert not early["trustworthy"] and "follow-up" in early["note"]
+    late = observable_churn(conn, as_of, now="2026-12-01 00:00:00")
+    assert late["trustworthy"] and late["note"] == ""
+
+
+def test_observable_churn_agrees_with_the_answer_key_given_follow_up():
+    # The key exists only because a simulator wrote it. The same labels must
+    # fall out of the raw events once enough time has passed.
+    import json
+    from churn.config import (HORIZON_DAYS, connect_readonly, cutoff_time,
+                              reference_now)
+    from churn.labels import label_agreement, observable_churn
+    conn = connect_readonly()
+    as_of = cutoff_time(conn, 112)           # ~3 months of follow-up
+    now = reference_now(conn)
+    result = observable_churn(conn, as_of, now)
+    assert result["trustworthy"]
+
+    end = str(pd.Timestamp(as_of) + pd.Timedelta(days=HORIZON_DAYS))
+    with open("churn_truth.json") as f:
+        truth = json.load(f)
+    keyed = {r["user_id"] for r in truth
+             if r["churned"] and as_of < r["active_until"] <= end}
+    conn.close()
+    agreement = label_agreement(result["churned_ids"], keyed)
+    assert agreement["precision"] > 0.85 and agreement["recall"] > 0.85
+
+
+def test_label_agreement_arithmetic():
+    from churn.labels import label_agreement
+    a = label_agreement({1, 2, 3}, {2, 3, 4})
+    assert a["agree"] == 2 and a["precision"] == pytest.approx(2 / 3)
+    assert label_agreement(set(), {1})["precision"] == 0.0
