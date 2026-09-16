@@ -172,9 +172,10 @@ experience, not silence.
 
 ![XGBoost feature importance](docs/img/feature_importance.png)
 
-Unresolved-ticket rate and recent logins lead, with `total_orders` close behind — the model
-uses it to judge *how much to trust* each rate: 1 cancellation in 4 orders is a guess, 10 in
-40 is a fact.
+Unresolved-ticket rate (0.134) and cancellation rate (0.099) lead, with recent orders,
+`total_orders` and recent logins clustered just behind (~0.088 each). The exposure counts earn
+their place by telling the model *how much to trust* each rate: 1 cancellation in 4 orders is a
+guess, 10 in 40 is a fact.
 
 ---
 
@@ -192,7 +193,7 @@ Latest live run on **`gpt-6-astra` via Azure OpenAI** (Responses API, keyless En
 | Verdicts | 14 MEDIUM, 1 LOW — no HIGH: complaints, but customers still logging in |
 | Precision | 0.07 (1 of 14) — the ML shortlist decides who; the agent explains |
 | Evidence fidelity | **100%** — all 90 cited facts matched the database |
-| Prose fidelity | **100%** — 77 claims extracted from the written reasons, all supported (71% of clauses yielded a checkable claim) |
+| Prose fidelity | **100%** — 84 claims extracted from the written reasons, all supported (71% of clauses yielded a checkable claim) |
 | Trajectory | **9/9 rules** — ranked once, checked tickets *and* reviews for all 15, nobody off-list, no repeats, 31 calls within budget |
 | Cost | 267,252 in / 8,853 out tokens, ~2 minutes |
 
@@ -274,7 +275,7 @@ Every decision below was **measured, not assumed**:
 | 🎯 **Risk picks, value orders** | Ranking the shortlist by risk × order value cost **40%** of its precision (0.073 vs 0.120): order value carries no churn signal. |
 | 💸 **An ROI that says no** | No paid intervention pays for itself on this shortlist; the honest recommendation is a ₹5 email, with the break-even figure that would change that. |
 | 🔒 **Least-privilege + PII** | Read-only DB; tools never return phone/email; a redaction middleware scrubs any leak before the LLM. |
-| 🛠 **Production-ready** | Scheduled scan with alerting · FastAPI service · Docker · keyless Azure auth · 53 tests in GitHub Actions. |
+| 🛠 **Production-ready** | Scheduled scan with alerting · FastAPI service · Docker · keyless Azure auth · 56 tests in GitHub Actions. |
 
 ### Things I measured that did **not** work
 

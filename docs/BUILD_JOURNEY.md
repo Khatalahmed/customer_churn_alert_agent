@@ -268,7 +268,7 @@ coverage - patterns only recognise claim types they were taught - so coverage is
 reported next to fidelity, and a clause nothing recognises counts as UNCHECKED,
 never as correct.
 
-**Result on the live run:** 77 claims extracted from 15 reasons, all supported -
+**Result on the live run:** 84 claims extracted from 15 reasons, all supported -
 100% prose fidelity, 71% clause coverage. The uncovered portion is rubric
 restatement ("Dissatisfaction: not established under the criteria"), which
 contains no factual claim to check.

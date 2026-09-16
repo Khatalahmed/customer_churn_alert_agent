@@ -30,6 +30,16 @@ NUMBER_WORDS = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 
+# What a count can be a count OF. A noun that implies its own category
+# ("two delivery delays") carries it; a generic one takes the category from
+# the words in between ("two refund tickets").
+HEAD_NOUNS = {
+    "tickets": None, "ticket": None, "complaints": None, "complaint": None,
+    "issues": None, "delays": "DELIVERY_DELAY", "delay": "DELIVERY_DELAY",
+    "refunds": "REFUND", "refund": "REFUND",
+    "payments": "PAYMENT", "payment": "PAYMENT",
+}
+
 # A word in the prose -> the ticket category it refers to. Order matters:
 # longer phrases are tried first so "delivery delay" is not read as "delivery".
 CATEGORY_WORDS = [
@@ -106,9 +116,16 @@ def _category_mentions(clause):
 
     A clause like "the product-quality ticket is closed, and the 3-star review
     mentioning slow delivery does not qualify" contains two category words but
-    only one ticket: 'delivery' belongs to the review. Each mention is bound to
-    whichever noun - ticket or review - sits closest to it.
+    only one ticket: 'delivery' belongs to the review. The clause is split into
+    comma/and segments so each mention is read with its own noun and its own
+    open/closed marker.
     """
+    # A segment must carry its own evidence that it is about a ticket. Letting
+    # later segments inherit the clause's ticket noun looked like free coverage
+    # and invented two product-quality tickets out of "1- and 2-star reviews
+    # about a wrong item, leakage and quality", because the comma split the
+    # descriptors away from the word "review". Missing a claim is cheap here;
+    # flagging true prose is not.
     seen, mentions = set(), []
     for segment in re.split(r",|\band\b", clause):
         flat = _flatten(segment)
@@ -223,21 +240,35 @@ def check_clause(clause, facts):
         label = "/".join(categories).lower() if categories else "any"
         qualifier = polarity or "any status"
 
-        counted = re.search(
-            r"\b(\d+|" + "|".join(NUMBER_WORDS) + r")\b[\w\s]{0,25}?\btickets?\b", flat)
-        if counted:
-            said = int(counted.group(1)) if counted.group(1).isdigit() else NUMBER_WORDS[counted.group(1)]
-            real = _count_tickets(facts, categories, polarity)
+        # Every count in the clause, each bound to its OWN head noun. "four
+        # unresolved tickets covering two delivery delays" is two claims - a
+        # total and a breakdown - and pooling the clause's categories into one
+        # count would check neither of them.
+        counted_spans = []
+        for match in re.finditer(
+                r"\b(\d+|" + "|".join(NUMBER_WORDS) + r")\b([\w\s]{0,40}?)\b(" +
+                "|".join(HEAD_NOUNS) + r")\b", flat):
+            word, middle, noun = match.group(1), match.group(2), match.group(3)
+            said = int(word) if word.isdigit() else NUMBER_WORDS[word]
+            if HEAD_NOUNS[noun]:                       # "two delivery delays"
+                cats = [HEAD_NOUNS[noun]]
+            else:                                      # "two refund tickets"
+                cats = _categories(middle)
+            real = _count_tickets(facts, cats, polarity)
+            counted_spans.append(match.span())
             claims.append(_claim(
-                "ticket_count", counted.group(0).strip(), said == real,
-                f"{real} {qualifier} {label} ticket(s) in the database", counted.span()))
-        else:
-            for category, mention_polarity in _category_mentions(clause) or [(None, polarity)]:
-                real = _count_tickets(facts, [category] if category else [], mention_polarity)
-                claims.append(_claim(
-                    "ticket_exists",
-                    f"{mention_polarity or 'any status'} {(category or 'any').lower()} ticket",
-                    real > 0, f"{real} in the database"))
+                "ticket_count", match.group(0).strip(), said == real,
+                f"{real} {qualifier} {'/'.join(cats).lower() or 'any'} ticket(s) "
+                f"in the database", match.span()))
+
+        # Existence claims run alongside the counts: "a payment problem and a
+        # missing refund" carries no number but still asserts those tickets.
+        for category, mention_polarity in _category_mentions(clause) or [(None, polarity)]:
+            real = _count_tickets(facts, [category] if category else [], mention_polarity)
+            claims.append(_claim(
+                "ticket_exists",
+                f"{mention_polarity or 'any status'} {(category or 'any').lower()} ticket",
+                real > 0, f"{real} in the database"))
 
         # "two waiting on the customer", "remains in progress"
         for status in ("waiting on the customer", "in progress", "open", "closed"):
@@ -300,7 +331,10 @@ def check_prose(text, facts):
             unchecked_clauses += 1
         claims.extend(found)
         spans = [c["span"] for c in found if c["span"]]
-        for match in re.finditer(r"\d+", clause):
+        # Number WORDS count too: "two delivery delays" is a quantity claim,
+        # and scanning only for digits hid it from this report entirely.
+        for match in re.finditer(r"\d+|\b(?:" + "|".join(NUMBER_WORDS) + r")\b",
+                                 _flatten(clause)):
             if not any(s <= match.start() < e for s, e in spans):
                 unchecked_numbers.append(f"{match.group(0)} in \"{clause}\"")
     return {

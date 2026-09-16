@@ -716,3 +716,38 @@ def test_prose_reads_enumerated_ratings_as_two_claims():
     ratings = [c for c in claims if c["kind"] == "review_rating"]
     assert len(ratings) == 2                     # not one range, not one number
     assert [c["ok"] for c in ratings] == [True, False]   # the 2-star is invented
+
+
+def test_prose_checks_a_breakdown_as_well_as_the_total():
+    # "four unresolved tickets covering two delivery delays" makes two
+    # quantity claims. Pooling them into one check verified neither.
+    from churn.prose_eval import check_prose
+    facts = _prose_facts()        # 3 unresolved refunds + 1 closed delivery
+    claims = check_prose(
+        "Four unresolved tickets covering three refunds and one delivery delay.",
+        facts)["claims"]
+    counts = {c["claim"]: c["ok"] for c in claims if c["kind"] == "ticket_count"}
+    assert len(counts) == 3
+    assert counts["four unresolved tickets"] is False      # only 3 are unresolved
+    assert counts["three refunds"] is True
+    assert counts["one delivery delay"] is False           # that one is closed
+
+
+def test_prose_reports_number_words_it_could_not_check():
+    from churn.prose_eval import check_prose
+    result = check_prose("Two deliveries arrived warm.", _prose_facts())
+    assert result["unchecked_numbers"], "a number word nobody checked must be reported"
+
+
+def test_prose_does_not_invent_a_ticket_from_review_descriptors():
+    # The comma splits "leakage and quality" away from the word "review".
+    # Letting such a fragment inherit the clause's ticket context invented
+    # two product-quality tickets for a customer who has none.
+    from churn.prose_eval import check_prose
+    facts = _prose_facts()
+    result = check_prose(
+        "An unresolved refund ticket, and 1- and 2-star reviews about a wrong "
+        "item, leakage and quality.", facts)
+    invented = [c for c in result["claims"]
+                if c["kind"].startswith("ticket") and not c["ok"]]
+    assert invented == [], f"invented a ticket from review text: {invented}"
