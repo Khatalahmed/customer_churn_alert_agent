@@ -20,7 +20,8 @@ import json
 from deepagents import create_deep_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-from .config import PREDICTIONS_PATH, TRACE_PATH, connect_readonly
+from .actions import CURRENCY, customer_money, open_complaint_categories, plan
+from .config import PREDICTIONS_PATH, TRACE_PATH, analysis_time, connect_readonly
 from .rubric import assess
 from .trace import ToolTraceMiddleware
 from .pii import PIIRedactionMiddleware
@@ -130,20 +131,35 @@ if __name__ == "__main__":
     # --- the VERDICT is decided HERE, in code, from facts re-queried from the
     # database - not by the LLM. The agent supplied evidence and explanations.
     conn = connect_readonly()
+    as_of = analysis_time(conn)
     predictions = []
     for a in report.assessments:
         verdict = assess(real_facts(conn, a.user_id))
-        predictions.append({**a.model_dump(), **verdict})
+        money = customer_money(conn, a.user_id, as_of)
+        action = plan(verdict, a.churn_probability, money["avg_order_value"],
+                      money["orders_per_month"], open_complaint_categories(conn, a.user_id, as_of))
+        predictions.append({**a.model_dump(), **verdict, **money, **action})
     conn.close()
+    # worth doing first: order by money saved, not by probability
+    predictions.sort(key=lambda p: p["expected_value"], reverse=True)
 
     # Print a readable summary.
     print("\n" + "=" * 70)
     print("CHURN ASSESSMENTS  (risk level computed by churn.rubric)")
     print("=" * 70)
     for p in predictions:
+        worth = "worth it" if p["worth_doing"] else "not worth it"
         print(f"[{p['risk_level']:<6}] user {p['user_id']:>4} {p['full_name']:<18} "
-              f"prob={p['churn_probability']:.2f} -> {p['suggested_action']}")
+              f"prob={p['churn_probability']:.0%} -> {p['intervention_label']}")
+        print(f"          {CURRENCY}{p['margin_at_risk']:,.0f} at risk, "
+              f"expected save {CURRENCY}{p['expected_save']:,.0f} - cost {CURRENCY}{p['cost']} "
+              f"= {CURRENCY}{p['expected_value']:,.0f} ({worth})")
         print(f"          reason: {p['reason']}")
+
+    total = sum(p["expected_value"] for p in predictions if p["worth_doing"])
+    doing = sum(1 for p in predictions if p["worth_doing"])
+    print(f"\n{doing} of {len(predictions)} interventions pay for themselves: "
+          f"{CURRENCY}{total:,.0f} expected value (illustrative - see churn/actions.py)")
     with open(PREDICTIONS_PATH, "w") as f:
         json.dump(predictions, f, indent=2)
     print(f"\nSaved {len(predictions)} predictions to {PREDICTIONS_PATH}")

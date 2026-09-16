@@ -12,6 +12,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from churn.features import add_labels, build_features, FEATURE_COLS
 from churn.config import MODEL_PATH
@@ -216,6 +217,60 @@ def test_rubric_verdicts_do_not_drift():
         facts = {"unresolved_serious_tickets": serious, "worst_review_rating": worst,
                  "logins_prev_30_60d": prev, "logins_recent_30d": recent}
         assert assess(facts)["risk_level"] == expected, label
+
+
+def test_intervention_matches_the_problem():
+    from churn.actions import choose_intervention
+    unhappy = {"risk_level": "HIGH", "dissatisfaction": True, "disengagement": True}
+    quiet = {"risk_level": "MEDIUM", "dissatisfaction": False, "disengagement": True}
+    fine = {"risk_level": "LOW", "dissatisfaction": False, "disengagement": False}
+    # fix the actual complaint, do not paper over it with a coupon
+    assert choose_intervention(unhappy, ["REFUND"]) == "resolve_open_ticket"
+    assert choose_intervention(unhappy, ["DELIVERY_DELAY"]) == "delivery_credit"
+    assert choose_intervention(unhappy, ["PRODUCT_QUALITY"]) == "replace_item"
+    # unhappy without an open ticket (a bad review) -> make it right
+    assert choose_intervention(unhappy, []) == "replace_item"
+    # quiet but content -> a coupon is exactly what this is for
+    assert choose_intervention(quiet, []) == "coupon"
+    # nothing wrong -> spend nothing
+    assert choose_intervention(fine, ["REFUND"]) == "none"
+
+
+def test_expected_value_pays_only_when_it_pays():
+    from churn.actions import expected_value
+    # valuable customer, high risk: worth acting on
+    rich = expected_value(0.30, avg_order_value=800, orders_per_month=6,
+                          intervention="coupon")
+    assert rich["worth_doing"] and rich["expected_value"] > 0
+    # same risk, tiny spend: the coupon costs more than it saves
+    poor = expected_value(0.30, avg_order_value=80, orders_per_month=0.5,
+                          intervention="coupon")
+    assert not poor["worth_doing"] and poor["expected_value"] < 0
+    # no action costs nothing and saves nothing
+    nothing = expected_value(0.9, 800, 6, "none")
+    assert nothing["cost"] == 0 and nothing["expected_save"] == 0
+    # expected value rises with churn probability
+    low, high = (expected_value(p, 800, 6, "coupon")["expected_value"] for p in (0.1, 0.5))
+    assert high > low
+
+
+def test_plan_downgrades_to_something_that_pays():
+    from churn.actions import break_even_margin, plan
+    unhappy = {"risk_level": "MEDIUM", "dissatisfaction": True, "disengagement": False}
+    # modest customer: a Rs 300 replacement cannot pay for itself at 14% risk,
+    # so the plan falls back to the near-free email instead of burning money
+    modest = plan(unhappy, 0.14, avg_order_value=300, orders_per_month=3,
+                  open_categories=["PRODUCT_QUALITY"])
+    assert modest["intervention"] == "email_nudge"
+    assert modest["downgraded_from"] == "replace_item"
+    assert modest["worth_doing"]
+    # valuable customer: the real fix pays, so keep it
+    valuable = plan(unhappy, 0.14, avg_order_value=2000, orders_per_month=8,
+                    open_categories=["PRODUCT_QUALITY"])
+    assert valuable["intervention"] == "replace_item" and valuable["worth_doing"]
+    # the break-even number says what would change a "no"
+    assert break_even_margin(0.14, "coupon") == pytest.approx(150 / (0.14 * 0.15))
+    assert break_even_margin(0.0, "coupon") == float("inf")
 
 
 def test_metrics_precision_recall_and_pr_auc():

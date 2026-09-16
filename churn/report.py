@@ -7,18 +7,21 @@ WHAT : Turns the agent's predictions into a human-readable retention report
 WHY  : The JSON predictions are for machines. A manager needs a clear report:
        who is at risk, how likely, why (SHAP factor + evidence), and what to do.
 FLOW : load predictions -> get the top SHAP factor per customer -> sort by
-       churn probability -> write a markdown file with a summary, a priority
-       table, and action groups.
+       expected value (money, not probability) -> write a markdown file with a
+       summary, a priority table, and action groups.
 """
 import json
 from datetime import datetime
 
+from .actions import CURRENCY
 from .config import PREDICTIONS_PATH, REPORT_PATH
 
 
 def build_report(preds: list[dict], factors: dict, generated: datetime) -> str:
     """Return the retention report as markdown text."""
-    preds = sorted(preds, key=lambda p: p.get("churn_probability", 0), reverse=True)
+    # worth doing first: expected value if we have it, else probability
+    preds = sorted(preds, key=lambda p: (p.get("expected_value", 0),
+                                         p.get("churn_probability", 0)), reverse=True)
 
     n = len(preds)
     high = [p for p in preds if p["risk_level"] == "HIGH"]
@@ -35,16 +38,24 @@ def build_report(preds: list[dict], factors: dict, generated: datetime) -> str:
     lines.append(f"- Customers investigated: **{n}**")
     lines.append(f"- HIGH risk: **{len(high)}**  |  MEDIUM risk: **{len(medium)}**")
     lines.append(f"- Recommended retention calls: **{len(calls)}**")
+    worth = [p for p in preds if p.get("worth_doing")]
+    if worth:
+        total = sum(p["expected_value"] for p in worth)
+        lines.append(f"- Interventions that pay for themselves: **{len(worth)}** "
+                     f"— **{CURRENCY}{total:,.0f}** expected value "
+                     f"*(illustrative: uplift and margin are assumptions, see `churn/actions.py`)*")
     lines.append("")
-    lines.append("## Priority list (highest churn probability first)")
+    lines.append("## Priority list (highest expected value first)")
     lines.append("")
-    lines.append("| # | Customer | Risk | Churn prob | Top ML factor | Action | Why |")
-    lines.append("|---|----------|------|-----------|---------------|--------|-----|")
+    lines.append("| # | Customer | Risk | Churn prob | Top ML factor | Do this | Expected value | Why |")
+    lines.append("|---|----------|------|-----------|---------------|---------|----------------|-----|")
     for i, p in enumerate(preds, 1):
         factor = factors.get(p["user_id"], "-")
+        action = p.get("intervention_label", p.get("suggested_action", "-"))
+        ev = (f"{CURRENCY}{p['expected_value']:,.0f}" if "expected_value" in p else "-")
         lines.append(
             f"| {i} | {p['full_name']} (#{p['user_id']}) | {p['risk_level']} | "
-            f"{p['churn_probability']:.0%} | {factor} | {p['suggested_action']} | {p['reason']} |"
+            f"{p['churn_probability']:.0%} | {factor} | {action} | {ev} | {p['reason']} |"
         )
     lines.append("")
 
