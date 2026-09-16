@@ -26,6 +26,7 @@ REPORT_PATH = DATA_DIR / "retention_report.md"
 TRACE_PATH = DATA_DIR / "agent_trace.json"      # tool calls of the last agent run
 WORKLIST_PATH = DATA_DIR / "worklist.json"      # output of the scheduled scan
 ACTION_LOG_PATH = DATA_DIR / "action_log.json"  # who we acted on, and who was held back
+METRICS_PATH = DATA_DIR / "model_metrics.json"  # what the last training run measured
 
 # --- point-in-time prediction setup -------------------------------------------
 # At a cutoff time T the model sees ONLY data from before T and predicts whether

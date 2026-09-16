@@ -18,6 +18,9 @@ LOGIC: at a ~1.4% churn rate ROC-AUC flatters everything, so PR-AUC (floor =
 NOTE : make_model() and grouped_cv_aucs() are importable; training only runs
        when this file is executed.
 """
+import json
+from datetime import datetime, timezone
+
 import joblib
 import numpy as np
 from sklearn.calibration import CalibratedClassifierCV
@@ -25,7 +28,8 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedGroupKFold
 from xgboost import XGBClassifier
 
-from .config import HORIZON_DAYS, MODEL_PATH, TEST_CUTOFF_DAYS, TRAIN_CUTOFFS_DAYS
+from .config import (HORIZON_DAYS, METRICS_PATH, MODEL_PATH, TEST_CUTOFF_DAYS,
+                     TRAIN_CUTOFFS_DAYS)
 from .features import build_snapshots
 from .metrics import brier, calibration_table, pr_auc, precision_at_k, recall_at_k
 
@@ -134,6 +138,40 @@ if __name__ == "__main__":
     print("\nFeature importance (higher = more useful to the model):")
     for name, imp in sorted(zip(cols, model.feature_importances_), key=lambda x: -x[1]):
         print(f"  {name:<26} {imp:.3f}")
+
+    # Write down what was just measured. The numbers above were printed and
+    # lost, so anything wanting to display them - the docs, the UI - had to
+    # copy them by hand and go stale. This records the same computation; it
+    # does not add one.
+    metrics = {
+        "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "horizon_days": HORIZON_DAYS,
+        "test_cutoff": test["as_of"].iloc[0],
+        "test_customers": len(test),
+        "test_churn": int(y_test.sum()),
+        "base_rate": round(float(base_rate), 5),
+        "cv_auc_mean": round(float(np.mean(aucs)), 4),
+        "cv_auc_std": round(float(np.std(aucs)), 4),
+        "cv_auc_folds": [round(float(a), 4) for a in aucs],
+        "roc_auc": round(float(roc_auc_score(y_test, cal_proba)), 4),
+        "pr_auc": round(float(pr_auc(y_test, cal_proba)), 4),
+        "pr_auc_floor": round(float(base_rate), 5),
+        "pr_auc_lift": round(float(pr_auc(y_test, cal_proba) / base_rate), 2),
+        "brier_raw": round(float(brier(y_test, raw_proba)), 4),
+        "brier_calibrated": round(float(brier(y_test, cal_proba)), 4),
+        "at_k": [{"k": k,
+                  "precision": round(float(precision_at_k(y_test, cal_proba, k)), 4),
+                  "lift": round(float(precision_at_k(y_test, cal_proba, k) / base_rate), 2),
+                  "recall": round(float(recall_at_k(y_test, cal_proba, k)), 4)}
+                 for k in (15, 30, 50, 100)],
+        "calibration": calibration_table(y_test, cal_proba),
+        "feature_importance": [{"feature": n, "importance": round(float(i), 4)}
+                               for n, i in sorted(zip(cols, model.feature_importances_),
+                                                  key=lambda x: -x[1])],
+    }
+    with open(METRICS_PATH, "w") as f:
+        json.dump(metrics, f, indent=2)
+    print(f"Saved metrics to {METRICS_PATH}")
 
     # the saved model never saw the test snapshot, so agent eval on it stays honest.
     # "model" is calibrated (scoring); "tree_model" is the raw booster for SHAP.

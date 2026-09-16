@@ -1130,3 +1130,82 @@ def test_no_matched_fix_keys_when_nothing_was_downgraded():
     assert "matched_fix" not in result
     assert result["break_even_margin"] == pytest.approx(
         break_even_margin(0.9, result["intervention"]), abs=0.01)
+
+
+def _client(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import churn.memory as memory
+    monkeypatch.setattr(memory, "STORE_PATH", tmp_path / "contacted.json")
+    from churn.api import app, _cache
+    _cache.clear()
+    return TestClient(app)
+
+
+def test_overview_describes_the_whole_population_not_just_the_shortlist(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    body = client.get("/overview").json()
+    assert body["scored_customers"] > body["shortlist_size"]
+    assert sum(body["risk_mix"].values()) == body["shortlist_size"]
+    # the risk mix is honestly scoped: risk levels exist only for the shortlist
+    assert "shortlist" in body["risk_mix_scope"]
+    histogram = body["probability_distribution"]
+    assert sum(b["count"] for b in histogram) == body["scored_customers"]
+
+
+def test_customer_search_matches_name_and_id(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    everyone = client.get("/customers?limit=1").json()
+    uid = everyone["customers"][0]["user_id"]
+    name = everyone["customers"][0]["full_name"]
+
+    by_id = client.get(f"/customers?q={uid}").json()
+    assert uid in [c["user_id"] for c in by_id["customers"]]
+
+    by_name = client.get(f"/customers?q={name.split()[0].lower()}").json()
+    assert by_name["total"] >= 1
+    assert client.get("/customers?q=zzzznotacustomer").json()["customers"] == []
+
+
+def test_timeline_and_explanation_refuse_unknown_customers(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    assert client.get("/customers/999999/timeline").status_code == 404
+    assert client.get("/customers/999999/explanation").status_code == 404
+
+
+def test_timeline_only_contains_events_from_before_the_analysis_time(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    uid = client.get("/worklist?top_n=1").json()["customers"][0]["user_id"]
+    body = client.get(f"/customers/{uid}/timeline").json()
+    assert body["events"], "a shortlisted customer has history"
+    assert all(e["at"] < body["as_of"] for e in body["events"])
+    assert {e["type"] for e in body["events"]} <= {"order", "ticket", "review"}
+
+
+def test_unproduced_artefacts_say_so_instead_of_returning_zeros(tmp_path, monkeypatch):
+    # The UI must be able to show "not measured yet", never a fabricated zero.
+    import churn.reporting as reporting
+    monkeypatch.setattr(reporting, "METRICS_PATH", tmp_path / "missing.json")
+    body = reporting.evaluations()
+    assert body["available"] is False
+    assert "train_model" in body["how"]
+
+
+def test_economics_exposes_its_assumptions(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    body = client.get("/economics").json()
+    assert body["illustrative"] is True
+    keys = body["assumptions"]
+    assert keys["margin_rate"] and keys["monthly_survival"] and keys["value_horizon_months"]
+    email = [i for i in body["interventions"] if i["key"] == "email_nudge"][0]
+    coupon = [i for i in body["interventions"] if i["key"] == "coupon"][0]
+    assert email["break_even_margin"] < coupon["break_even_margin"]
+
+
+def test_reliability_reports_all_three_agent_checks(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    body = client.get("/reliability").json()
+    if not body.get("available"):
+        pytest.skip("no saved agent run in this checkout")
+    assert 0 <= body["evidence"]["fidelity"] <= 1
+    assert 0 <= body["prose"]["fidelity"] <= 1
+    assert body["trajectory"]["total"] == len(body["trajectory"]["rules"])
