@@ -49,17 +49,24 @@ az group create -n churnguard-rg -l southeastasia
 
 ENV_ID=$(az containerapp env show -n <env-name> -g <env-resource-group> --query id -o tsv)
 
-az containerapp create -n churnguard-api -g churnguard-rg   --environment "$ENV_ID"   --image ghcr.io/khatalahmed/churnguard-api:latest   --ingress external --target-port 8000   --cpu 1 --memory 2Gi   --min-replicas 0 --max-replicas 1   --query properties.configuration.ingress.fqdn -o tsv
+az containerapp create -n churnguard-api -g churnguard-rg \
+  --environment "$ENV_ID" \
+  --image ghcr.io/khatalahmed/churnguard-api:<12-char sha> \
+  --ingress external --target-port 8000 \
+  --cpu 1 --memory 2Gi \
+  --min-replicas 0 --max-replicas 1 \
+  --query properties.configuration.ingress.fqdn -o tsv
 ```
 
 With no environment yet, create one first — `--logs-destination none` avoids Log Analytics
 ingestion charges, and live logs still stream with `az containerapp logs show`:
 
 ```bash
-az containerapp env create -n churnguard-env -g churnguard-rg -l southeastasia   --logs-destination none
+az containerapp env create -n churnguard-env -g churnguard-rg -l southeastasia \
+  --logs-destination none
 ```
 
-The last command prints the address. `https://<fqdn>/health` should answer with the analysis
+`containerapp create` prints the address. `https://<fqdn>/health` should answer with the analysis
 time and the number of customers scored; `/docs` is the interactive API.
 
 Why these settings:
@@ -132,6 +139,7 @@ browser only talks to Vercel, and Vercel talks to Azure. The UI redeploys on eve
 | Symptom | Cause |
 |---|---|
 | Every page says "Service unreachable" | `CHURN_API_URL` unset, misspelled, or has a trailing slash |
+| `The environment '.../C:/Program Files/Git/subscriptions/...' does not exist` | Git Bash rewrote the resource id as a Windows path; run `export MSYS_NO_PATHCONV=1` first, or use PowerShell |
 | `containerapp create` fails pulling the image | the ghcr.io package is still private (step 1) |
 | First request times out | the app is waking from zero; wait and reload |
 | Panels say "not measured yet" | that artefact was not produced — the panel names the command |
