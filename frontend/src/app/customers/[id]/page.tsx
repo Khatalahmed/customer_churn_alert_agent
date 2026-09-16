@@ -46,17 +46,30 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
       </Link>
 
       <header className="mb-5 flex flex-wrap items-start justify-between gap-5">
-        <div>
+        <div className="flex items-center gap-4">
+          <span
+            className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] text-[17px] font-black text-white shadow-[var(--shadow-accent)]"
+            style={{ background: "var(--accent-grad)" }}
+            aria-hidden
+          >
+            {customer.full_name
+              .split(" ")
+              .map((part) => part[0])
+              .slice(0, 2)
+              .join("")}
+          </span>
+          <div>
           <div className="flex items-center gap-2.5">
-            <h1 className="text-[22px] font-semibold tracking-tight">{customer.full_name}</h1>
+            <h1 className="text-[26px] font-black tracking-tight">{customer.full_name}</h1>
             <RiskBadge level={customer.risk_level} />
             {customer.contacted_recently ? (
               <span className="text-[11px] text-[var(--text-subtle)]">contacted recently</span>
             ) : null}
           </div>
-          <p className="tnum mt-1 text-[12px] text-[var(--text-subtle)]">
+          <p className="tnum mt-1 text-[12px] font-semibold text-[var(--text-subtle)]">
             Customer #{customer.user_id}
           </p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-start gap-x-9 gap-y-4">

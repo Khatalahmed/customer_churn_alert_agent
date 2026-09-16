@@ -30,6 +30,7 @@ export default async function EvaluationsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Measured, not claimed"
         title="Evaluations"
         description="What this system has actually been measured to do — on a held-out snapshot the model never saw, and on the agent run currently in the repository."
       />
@@ -164,7 +165,7 @@ export default async function EvaluationsPage() {
       {/* ---------------- agent ---------------- */}
       <h2
         id="reliability"
-        className="mt-8 scroll-mt-20 text-[15px] font-semibold tracking-tight"
+        className="mt-10 scroll-mt-20 text-[22px] font-black tracking-tight"
       >
         Agent reliability
       </h2>
@@ -257,7 +258,7 @@ export default async function EvaluationsPage() {
       )}
 
       {/* ---------------- outcome experiment ---------------- */}
-      <h2 className="mt-8 text-[15px] font-semibold tracking-tight">Did acting on it help?</h2>
+      <h2 className="mt-10 text-[22px] font-black tracking-tight">Did acting on it help?</h2>
       <p className="mb-3 mt-1 max-w-3xl text-[12.5px] leading-relaxed text-[var(--text-muted)]">
         Part of the worklist is held back by a seeded random draw. Without a control the number is
         meaningless: the customers you contact are the ones most likely to leave.

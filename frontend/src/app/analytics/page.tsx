@@ -58,6 +58,7 @@ export default async function AnalyticsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Unit economics"
         title="Analytics"
         description="What each intervention would have to be worth before it is worth doing — and what the current worklist actually justifies."
       />

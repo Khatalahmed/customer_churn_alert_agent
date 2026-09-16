@@ -24,6 +24,7 @@ export default async function WorklistPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Operational queue"
         title="Worklist"
         description={`The customers to act on as of ${moment(worklist.analysis_time)} — chosen by the model, graded by the rubric, and priced before they reach this table.`}
       />
@@ -35,28 +36,46 @@ export default async function WorklistPage() {
         />
       ) : (
         <>
-          <div className="mb-4 flex flex-wrap gap-x-10 gap-y-4 rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)] px-5 py-4">
-            <Stat label="Customers" value={worklist.customers.length} hint="top by churn risk" />
-            <Stat
-              label="Worth acting on"
-              value={`${worklist.worth_doing} / ${worklist.customers.length}`}
-              hint="expected value above cost"
-            />
-            <Stat
-              label="Margin at risk"
-              value={money(marginAtRisk, currency)}
-              hint="present value, all listed"
-            />
-            <Stat
-              label="Intervention cost"
-              value={money(cost, currency)}
-              hint="if every worthwhile action is taken"
-            />
-            <Stat
-              label="Expected value"
-              value={money(worklist.expected_value_total, currency)}
-              hint="net of that cost"
-            />
+          {/* Stats strip — glassmorphism card */}
+          <div
+            className="mb-4 grid grid-cols-2 gap-px overflow-hidden rounded-[var(--radius-card)] sm:grid-cols-3 lg:grid-cols-5"
+            style={{
+              background: "var(--border)",
+              border: "1px solid var(--border)",
+              boxShadow: "var(--shadow-sm)",
+            }}
+          >
+            {[
+              { label: "Customers", value: worklist.customers.length, hint: "top by churn risk" },
+              {
+                label: "Worth acting on",
+                value: `${worklist.worth_doing} / ${worklist.customers.length}`,
+                hint: "expected value above cost",
+              },
+              {
+                label: "Margin at risk",
+                value: money(marginAtRisk, currency),
+                hint: "present value, all listed",
+              },
+              {
+                label: "Intervention cost",
+                value: money(cost, currency),
+                hint: "if every worthwhile action is taken",
+              },
+              {
+                label: "Expected value",
+                value: money(worklist.expected_value_total, currency),
+                hint: "net of that cost",
+              },
+            ].map((s) => (
+              <div
+                key={s.label}
+                className="flex flex-col justify-center px-5 py-4"
+                style={{ background: "var(--surface)" }}
+              >
+                <Stat label={s.label} value={s.value} hint={s.hint} />
+              </div>
+            ))}
           </div>
 
           <WorklistTable customers={worklist.customers} currency={currency} />

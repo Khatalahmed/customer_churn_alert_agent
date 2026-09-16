@@ -31,6 +31,7 @@ export default async function InvestigationsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Multi-agent"
         title="Investigations"
         description="The agent reads ticket text and review prose for the customers the model shortlisted, and writes the explanation. It does not decide the risk level — code does that, from facts re-queried from the database."
       />

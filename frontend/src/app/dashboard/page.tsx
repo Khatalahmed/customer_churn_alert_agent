@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { AlertTriangle, ArrowRight, IndianRupee, TrendingUp, Users, Wallet } from "lucide-react";
 
 import { RiskDistribution } from "@/components/dashboard/RiskDistribution";
 import { WorklistTable } from "@/components/worklist/WorklistTable";
@@ -37,50 +37,59 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Today"
         title="Overview"
         description={`What needs attention as of ${moment(overview.analysis_time)}. Every figure is computed from data before that moment only.`}
       >
         <Link
           href="/worklist"
-          className="flex items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[12.5px] font-medium transition-colors hover:border-[var(--border-strong)]"
+          className="flex items-center gap-2 rounded-[var(--radius-control)] px-4 py-2 text-[13px] font-semibold text-white transition-all duration-200 hover:opacity-90 hover:shadow-[0_0_20px_rgba(99,102,241,0.4)]"
+          style={{ background: "var(--accent-grad)" }}
         >
           Open worklist
           <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </PageHeader>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      {/* Metric cards — staggered entrance */}
+      <div className="metric-stagger grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Metric
           label="Customers scored"
           value={compact(overview.scored_customers)}
+          icon={<Users className="h-[17px] w-[17px]" strokeWidth={2.2} />}
           hint="every customer active at the analysis time"
         />
         <Metric
           label="High risk"
           value={overview.risk_mix.HIGH}
           tone="HIGH"
+          icon={<AlertTriangle className="h-[17px] w-[17px]" strokeWidth={2.2} />}
           hint="unresolved complaint and falling logins"
         />
         <Metric
           label="Medium risk"
           value={overview.risk_mix.MEDIUM}
           tone="MEDIUM"
+          icon={<TrendingUp className="h-[17px] w-[17px]" strokeWidth={2.2} />}
           hint="one of the two signals"
         />
         <Metric
           label="Margin at risk"
           value={money(overview.margin_at_risk, overview.currency)}
+          icon={<Wallet className="h-[17px] w-[17px]" strokeWidth={2.2} />}
           hint="on the shortlist, discounted"
         />
         <Metric
           label="Expected value"
           value={money(overview.expected_value_total, overview.currency)}
+          icon={<IndianRupee className="h-[17px] w-[17px]" strokeWidth={2.2} />}
           hint={`${overview.worth_doing} of ${overview.shortlist_size} actions pay for themselves`}
         />
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-[1.35fr_1fr]">
-        <Card>
+        {/* Risk distribution chart */}
+        <Card accent>
           <CardHeader
             title="Where the risk sits"
             description={`All ${compact(overview.scored_customers)} scored customers by churn probability. The shortlist is the red tail — the model's job is to find it, not to raise everyone's score.`}
@@ -88,32 +97,47 @@ export default async function DashboardPage() {
           <RiskDistribution bins={overview.probability_distribution} cutoff={shortlistCutoff} />
         </Card>
 
+        {/* Risk level breakdown */}
         <Card>
           <CardHeader
             title="Risk levels"
             description={overview.risk_mix_scope}
           />
-          <dl className="space-y-3">
+          <dl className="space-y-4">
             {(["HIGH", "MEDIUM", "LOW"] as const).map((level) => {
               const count = overview.risk_mix[level];
               const share = overview.shortlist_size ? count / overview.shortlist_size : 0;
+              const gradMap = {
+                HIGH:   "linear-gradient(90deg, #ef4444, #f87171)",
+                MEDIUM: "linear-gradient(90deg, #f59e0b, #fbbf24)",
+                LOW:    "linear-gradient(90deg, #22c55e, #4ade80)",
+              };
+              const glowMap = {
+                HIGH:   "rgba(239,68,68,0.3)",
+                MEDIUM: "rgba(245,158,11,0.25)",
+                LOW:    "rgba(34,197,94,0.2)",
+              };
               return (
                 <div key={level}>
                   <div className="flex items-baseline justify-between">
-                    <dt className="text-[12px] text-[var(--text-muted)]">{level}</dt>
-                    <dd className="tnum text-[12.5px] font-medium">
+                    <dt className="text-[12px] font-medium text-[var(--text-muted)]">{level}</dt>
+                    <dd className="tnum text-[13px] font-semibold text-[var(--text)]">
                       {count}
-                      <span className="ml-1.5 text-[11px] text-[var(--text-subtle)]">
+                      <span className="ml-1.5 text-[11px] font-normal text-[var(--text-subtle)]">
                         {percent(share, 0)}
                       </span>
                     </dd>
                   </div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                  <div
+                    className="mt-2 h-2 overflow-hidden rounded-full"
+                    style={{ background: "var(--surface-3)" }}
+                  >
                     <div
-                      className="h-full rounded-full"
+                      className="h-full rounded-full transition-all duration-700"
                       style={{
-                        width: `${Math.max(share * 100, count ? 3 : 0)}%`,
-                        background: `var(--${level.toLowerCase()})`,
+                        width: `${Math.max(share * 100, count ? 2 : 0)}%`,
+                        background: gradMap[level],
+                        boxShadow: `0 0 8px ${glowMap[level]}`,
                       }}
                     />
                   </div>
@@ -121,13 +145,17 @@ export default async function DashboardPage() {
               );
             })}
           </dl>
-          <p className="mt-4 border-t border-[var(--border)] pt-3 text-[11.5px] leading-relaxed text-[var(--text-subtle)]">
+          <p
+            className="mt-5 pt-4 text-[11.5px] leading-relaxed text-[var(--text-subtle)]"
+            style={{ borderTop: "1px solid var(--border)" }}
+          >
             The model picks <em>who</em> to look at. The risk level is then assigned by code from
             facts re-queried from the database — not by the model, and not by the LLM.
           </p>
         </Card>
       </div>
 
+      {/* Priority worklist */}
       <Card className="mt-3">
         <CardHeader
           title="Priority worklist"
@@ -135,8 +163,9 @@ export default async function DashboardPage() {
           action={
             <Link
               href="/worklist"
-              className="text-[12px] text-[var(--accent)] hover:underline"
+              className="flex items-center gap-1 text-[12px] font-medium text-[var(--accent)] transition-colors hover:text-[var(--accent-bright)]"
             >
+              <TrendingUp className="h-3.5 w-3.5" aria-hidden />
               All {isError(worklist) ? "" : worklist.customers.length} →
             </Link>
           }
@@ -152,7 +181,7 @@ export default async function DashboardPage() {
         )}
       </Card>
 
-      <p className="mt-3 text-[11.5px] text-[var(--text-subtle)]">{overview.note}</p>
+      <p className="mt-4 text-[11.5px] text-[var(--text-subtle)]">{overview.note}</p>
     </>
   );
 }

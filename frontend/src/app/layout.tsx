@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Outfit } from "next/font/google";
 
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -7,8 +7,14 @@ import { Topbar, type SystemStatus } from "@/components/layout/Topbar";
 import { api } from "@/lib/api";
 import "./globals.css";
 
-const sans = Geist({ variable: "--font-sans", subsets: ["latin"] });
-const mono = Geist_Mono({ variable: "--font-mono", subsets: ["latin"] });
+// Outfit, the hostel operating system's typeface: it carries the 800/900
+// weights the display numerals rely on without looking like a headline font.
+const outfit = Outfit({
+  variable: "--font-outfit",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "ChurnGuard — Customer churn early-warning",
@@ -35,12 +41,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en">
-      <body className={`${sans.variable} ${mono.variable} antialiased`}>
+      <body className={`${outfit.variable} antialiased`}>
         <div className="flex min-h-screen">
           <Sidebar analysisTime={analysisTime} />
           <div className="flex min-w-0 flex-1 flex-col">
             <Topbar status={status} />
-            <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6">
+            <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-7 sm:px-6">
               {children}
             </main>
           </div>

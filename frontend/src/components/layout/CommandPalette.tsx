@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Search, User } from "lucide-react";
+import { ArrowRight, Search, User, Zap } from "lucide-react";
 
 import { cn, percent } from "@/lib/format";
 
@@ -118,7 +118,8 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-[12vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]"
+      style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
       onClick={close}
       role="presentation"
     >
@@ -126,11 +127,22 @@ export function CommandPalette() {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="w-full max-w-xl overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-strong)] bg-[var(--surface)] shadow-2xl"
+        className="animate-scale-in w-full max-w-xl overflow-hidden rounded-[var(--radius-lg)]"
+        style={{
+          background: "rgba(10,10,20,0.92)",
+          border: "1px solid var(--border-strong)",
+          backdropFilter: "blur(24px)",
+          WebkitBackdropFilter: "blur(24px)",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.7), 0 0 40px rgba(99,102,241,0.12)",
+        }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-2.5 border-b border-[var(--border)] px-4">
-          <Search className="h-4 w-4 text-[var(--text-subtle)]" aria-hidden />
+        {/* Search input row */}
+        <div
+          className="flex items-center gap-3 px-4"
+          style={{ borderBottom: "1px solid var(--border)" }}
+        >
+          <Search className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden />
           <input
             ref={inputRef}
             value={query}
@@ -151,19 +163,31 @@ export function CommandPalette() {
             }}
             placeholder="Search customers, or jump to a page…"
             aria-label="Search"
-            className="w-full bg-transparent py-3.5 text-[13px] outline-none placeholder:text-[var(--text-subtle)]"
+            className="w-full bg-transparent py-4 text-[14px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
           />
-          <kbd className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-subtle)]">
+          <kbd
+            className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-medium text-[var(--text-subtle)]"
+            style={{ background: "var(--surface-2)" }}
+          >
             esc
           </kbd>
         </div>
 
-        <ul className="max-h-[320px] overflow-y-auto p-1.5">
+        {/* Results list */}
+        <ul className="max-h-[320px] overflow-y-auto p-2">
           {results.length === 0 ? (
-            <li className="px-3 py-6 text-center text-[12px] text-[var(--text-subtle)]">
-              {trimmed.length < MIN_QUERY
-                ? "Type at least two characters to search customers."
-                : "No matches."}
+            <li className="flex flex-col items-center justify-center px-3 py-10 text-center">
+              <div
+                className="mb-3 flex h-9 w-9 items-center justify-center rounded-full"
+                style={{ background: "var(--surface-2)" }}
+              >
+                <Search className="h-4 w-4 text-[var(--text-subtle)]" aria-hidden />
+              </div>
+              <p className="text-[12.5px] text-[var(--text-subtle)]">
+                {trimmed.length < MIN_QUERY
+                  ? "Type at least two characters to search customers."
+                  : "No matches found."}
+              </p>
             </li>
           ) : (
             results.map((result, index) => (
@@ -173,24 +197,56 @@ export function CommandPalette() {
                   onMouseEnter={() => setCursor(index)}
                   onClick={() => go(result.href)}
                   className={cn(
-                    "flex w-full items-center gap-2.5 rounded-[var(--radius-control)] px-2.5 py-2 text-left",
-                    index === cursor ? "bg-[var(--surface-2)]" : "",
+                    "flex w-full items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-left transition-colors",
+                    index === cursor
+                      ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                      : "text-[var(--text-muted)] hover:bg-[var(--surface-2)]",
                   )}
                 >
-                  {result.kind === "customer" ? (
-                    <User className="h-3.5 w-3.5 text-[var(--text-subtle)]" aria-hidden />
-                  ) : (
-                    <ArrowRight className="h-3.5 w-3.5 text-[var(--text-subtle)]" aria-hidden />
-                  )}
-                  <span className="text-[13px]">{result.label}</span>
-                  <span className="ml-auto text-[11px] text-[var(--text-subtle)]">
-                    {result.hint}
+                  <span
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+                    style={{
+                      background: index === cursor ? "rgba(99,102,241,0.2)" : "var(--surface-2)",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    {result.kind === "customer" ? (
+                      <User className="h-3.5 w-3.5" aria-hidden />
+                    ) : (
+                      <Zap className="h-3.5 w-3.5" aria-hidden />
+                    )}
                   </span>
+                  <span className={cn("flex-1 text-[13px] font-medium", index === cursor ? "text-[var(--text)]" : "")}>
+                    {result.label}
+                  </span>
+                  <span className="text-[11px] text-[var(--text-subtle)]">{result.hint}</span>
+                  {index === cursor && (
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" aria-hidden />
+                  )}
                 </button>
               </li>
             ))
           )}
         </ul>
+
+        {/* Footer hint */}
+        <div
+          className="flex items-center gap-3 px-4 py-2.5"
+          style={{ borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}
+        >
+          <span className="text-[10.5px] text-[var(--text-subtle)]">
+            <kbd className="rounded border border-[var(--border)] px-1 py-0.5 font-sans">↑↓</kbd>{" "}
+            navigate
+          </span>
+          <span className="text-[10.5px] text-[var(--text-subtle)]">
+            <kbd className="rounded border border-[var(--border)] px-1 py-0.5 font-sans">↵</kbd>{" "}
+            select
+          </span>
+          <span className="text-[10.5px] text-[var(--text-subtle)]">
+            <kbd className="rounded border border-[var(--border)] px-1 py-0.5 font-sans">esc</kbd>{" "}
+            close
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -221,11 +277,11 @@ export function CommandHint() {
           new KeyboardEvent("keydown", { key: "k", ctrlKey: !mac, metaKey: mac, bubbles: true }),
         )
       }
-      className="flex items-center gap-2 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[12px] text-[var(--text-subtle)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-muted)]"
+      className="flex items-center gap-2 rounded-[var(--radius-control)] border border-white/20 bg-white/10 px-3 py-2 text-[12px] font-semibold text-indigo-100 backdrop-blur-sm transition-all hover:bg-white/20 hover:text-white active:scale-95"
     >
       <Search className="h-3.5 w-3.5" aria-hidden />
-      <span className="hidden sm:inline">Search customers</span>
-      <kbd className="tnum rounded border border-[var(--border)] px-1 py-0.5 text-[10px]">
+      <span className="hidden sm:inline">Search</span>
+      <kbd className="tnum rounded border border-white/25 bg-white/10 px-1.5 py-0.5 text-[10px] text-white">
         {mac ? "⌘K" : "Ctrl K"}
       </kbd>
     </button>

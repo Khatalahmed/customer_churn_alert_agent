@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowUpDown, Check, Search } from "lucide-react";
+import { Check, Search, SlidersHorizontal } from "lucide-react";
 
 import { Badge, Empty, RiskBadge, Table, Td, Th } from "@/components/ui/primitives";
 import { cn, money, moneySigned, percent } from "@/lib/format";
@@ -16,8 +16,8 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "HIGH", label: "High risk" },
   { key: "MEDIUM", label: "Medium risk" },
   { key: "LOW", label: "Low risk" },
-  { key: "worth", label: "Positive expected value" },
-  { key: "not-worth", label: "Not worth acting on" },
+  { key: "worth", label: "Positive EV" },
+  { key: "not-worth", label: "No action" },
 ];
 
 const SORTS: { key: Sort; label: string }[] = [
@@ -28,6 +28,19 @@ const SORTS: { key: Sort; label: string }[] = [
 ];
 
 const RISK_ORDER = { HIGH: 0, MEDIUM: 1, LOW: 2 } as const;
+
+// Map each filter to a border/text highlight colour when active
+/* The selected pill goes solid and lifts, the way the hostel's building
+   filter does; the risk filters keep their own colour so the control still
+   says which risk you are looking at. */
+const FILTER_ACTIVE: Record<Filter, string> = {
+  all: "linear-gradient(135deg,#4f46e5,#7c3aed)",
+  HIGH: "linear-gradient(135deg,#dc2626,#ef4444)",
+  MEDIUM: "linear-gradient(135deg,#b45309,#f59e0b)",
+  LOW: "linear-gradient(135deg,#047857,#10b981)",
+  worth: "linear-gradient(135deg,#047857,#10b981)",
+  "not-worth": "linear-gradient(135deg,#475569,#64748b)",
+};
 
 /** The primary signal behind a verdict, in the fewest words that stay true. */
 function primarySignal(customer: CustomerView): string {
@@ -76,8 +89,9 @@ export function WorklistTable({
   return (
     <div>
       {!dense ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter worklist">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          {/* Filter pills */}
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter worklist">
             {FILTERS.map((option) => (
               <button
                 key={option.key}
@@ -85,11 +99,14 @@ export function WorklistTable({
                 onClick={() => setFilter(option.key)}
                 aria-pressed={filter === option.key}
                 className={cn(
-                  "rounded-[var(--radius-control)] border px-2.5 py-1.5 text-[12px] transition-colors",
+                  "rounded-full px-3.5 py-1.5 text-[12px] font-bold transition-all duration-200 active:scale-95",
                   filter === option.key
-                    ? "border-[var(--border-strong)] bg-[var(--surface-2)] font-medium text-[var(--text)]"
-                    : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]",
+                    ? "scale-105 border border-transparent text-white shadow-[var(--shadow-accent)]"
+                    : "border border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-muted)] hover:-translate-y-0.5 hover:border-[var(--accent)] hover:text-[var(--accent)]",
                 )}
+                style={
+                  filter === option.key ? { background: FILTER_ACTIVE[option.key] } : undefined
+                }
               >
                 {option.label}
               </button>
@@ -97,6 +114,7 @@ export function WorklistTable({
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            {/* Search */}
             <label className="relative">
               <span className="sr-only">Search this worklist</span>
               <Search
@@ -107,16 +125,20 @@ export function WorklistTable({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Filter by name or id"
-                className="w-[190px] rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface)] py-1.5 pl-8 pr-2.5 text-[12px] outline-none placeholder:text-[var(--text-subtle)] focus:border-[var(--border-strong)]"
+                className="w-[200px] rounded-[var(--radius-control)] border border-[var(--border)] py-1.5 pl-8 pr-2.5 text-[12px] text-[var(--text)] outline-none transition-all placeholder:text-[var(--text-subtle)] focus:border-[var(--accent-deep)] focus:shadow-[0_0_0_2px_rgba(99,102,241,0.15)]"
+                style={{ background: "var(--surface)" }}
               />
             </label>
+
+            {/* Sort */}
             <label className="flex items-center gap-1.5 text-[12px] text-[var(--text-subtle)]">
-              <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
               <span className="sr-only">Sort by</span>
               <select
                 value={sort}
                 onChange={(event) => setSort(event.target.value as Sort)}
-                className="rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text)] outline-none focus:border-[var(--border-strong)]"
+                className="rounded-[var(--radius-control)] border border-[var(--border)] px-2.5 py-1.5 text-[12px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent-deep)]"
+                style={{ background: "var(--surface)" }}
               >
                 {SORTS.map((option) => (
                   <option key={option.key} value={option.key}>
@@ -135,7 +157,10 @@ export function WorklistTable({
           body="Clear the filter or search to see the rest of the worklist."
         />
       ) : (
-        <div className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--surface)]">
+        <div
+          className="overflow-hidden rounded-[var(--radius-card)]"
+          style={{ border: "1px solid var(--border)", background: "var(--surface)" }}
+        >
           <div className="max-h-[70vh] overflow-auto">
             <Table>
               <thead>
@@ -154,12 +179,20 @@ export function WorklistTable({
                 {rows.map((customer) => (
                   <tr
                     key={customer.user_id}
-                    className="group transition-colors hover:bg-[var(--surface-2)]"
+                    className="group relative transition-colors hover:bg-[var(--surface-2)]"
                   >
+                    {/* Left accent bar for HIGH risk rows */}
+                    {customer.risk_level === "HIGH" && (
+                      <td
+                        aria-hidden
+                        className="absolute left-0 top-[1px] bottom-[1px] w-[3px]"
+                        style={{ background: "var(--high-vivid)", opacity: 0.6 }}
+                      />
+                    )}
                     <Td>
                       <Link
                         href={`/customers/${customer.user_id}`}
-                        className="font-medium hover:text-[var(--accent)]"
+                        className="font-semibold transition-colors hover:text-[var(--accent)]"
                       >
                         {customer.full_name}
                       </Link>
@@ -170,12 +203,12 @@ export function WorklistTable({
                     <Td>
                       <RiskBadge level={customer.risk_level} />
                     </Td>
-                    <Td align="right" className="tnum font-medium">
+                    <Td align="right" className="tnum font-semibold">
                       {percent(customer.churn_probability)}
                     </Td>
                     <Td className="text-[var(--text-muted)]">{primarySignal(customer)}</Td>
                     <Td>
-                      <span>{customer.intervention_label}</span>
+                      <span className="text-[var(--text)]">{customer.intervention_label}</span>
                       {customer.downgraded_from ? (
                         <div className="text-[11px] text-[var(--text-subtle)]">
                           downgraded from {customer.downgraded_from.replace(/_/g, " ")}
@@ -185,7 +218,7 @@ export function WorklistTable({
                     <Td align="right" className="tnum text-[var(--text-muted)]">
                       {money(customer.margin_at_risk, currency)}
                     </Td>
-                    <Td align="right" className="tnum font-medium">
+                    <Td align="right" className="tnum font-semibold">
                       {moneySigned(customer.expected_value, currency)}
                     </Td>
                     <Td>
@@ -207,7 +240,7 @@ export function WorklistTable({
       )}
 
       {!dense ? (
-        <p className="mt-2.5 text-[11.5px] text-[var(--text-subtle)]">
+        <p className="mt-3 text-[11.5px] text-[var(--text-subtle)]">
           Showing {rows.length} of {customers.length}. &ldquo;Marginal&rdquo; means the action stops
           paying if the assumed uplift is half what we expect.
         </p>

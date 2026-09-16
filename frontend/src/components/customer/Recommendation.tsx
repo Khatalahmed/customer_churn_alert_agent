@@ -17,13 +17,13 @@ export function Recommendation({ customer }: { customer: CustomerView }) {
   const [low, high] = customer.value_range;
 
   return (
-    <Card className="border-[var(--border-strong)]">
+    <Card accent>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-subtle)]">
+          <p className="text-[10.5px] font-extrabold uppercase tracking-[0.2em] text-[var(--accent)]">
             Recommended action
           </p>
-          <h2 className="mt-1.5 text-[17px] font-semibold tracking-tight">
+          <h2 className="mt-2 text-[22px] font-black tracking-tight">
             {customer.intervention_label}
           </h2>
         </div>
