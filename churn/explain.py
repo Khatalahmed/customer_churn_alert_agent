@@ -40,7 +40,8 @@ FRIENDLY = {
 def _load_and_explain():
     """Load the model and compute SHAP values for every customer."""
     bundle = joblib.load(MODEL_PATH)
-    model, cols = bundle["model"], bundle["features"]
+    # SHAP explains the tree model; the saved "model" is a calibrated wrapper
+    model, cols = bundle.get("tree_model", bundle["model"]), bundle["features"]
     df, _ = build_features()
     X = df[cols]
     explainer = shap.TreeExplainer(model)

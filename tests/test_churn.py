@@ -144,6 +144,23 @@ def test_azure_provider_is_keyless_and_configured_from_env(monkeypatch):
         get_model()
 
 
+def test_metrics_precision_recall_and_pr_auc():
+    from churn.metrics import calibration_table, pr_auc, precision_at_k, recall_at_k
+    y = np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0])          # base rate 0.2
+    perfect = np.array([9, 8, 1, 1, 1, 1, 1, 1, 1, 1])
+    assert precision_at_k(y, perfect, 2) == 1.0
+    assert recall_at_k(y, perfect, 2) == 1.0
+    assert recall_at_k(y, perfect, 1) == 0.5
+    # PR-AUC floor is the base rate, not 0.5 - that is why we report it
+    assert pr_auc(y, perfect) == 1.0
+    import pytest
+    assert pr_auc(y, np.zeros(10)) == pytest.approx(0.2)
+    # a calibrated model predicts what actually happens
+    rows = calibration_table(y, np.array([0.9, 0.9] + [0.1] * 8), bins=5, strategy="width")
+    top = [r for r in rows if r["bucket"].startswith("0.800")][0]
+    assert top["observed"] == 1.0 and top["n"] == 2
+
+
 def test_rubric_truth_table():
     # the whole risk decision, in code: two signals -> three levels
     from churn.rubric import assess

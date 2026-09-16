@@ -24,7 +24,8 @@ from sklearn.preprocessing import StandardScaler
 
 from .config import TEST_CUTOFF_DAYS, TRAIN_CUTOFFS_DAYS
 from .features import build_snapshots
-from .train_model import make_model, precision_at_k
+from .metrics import pr_auc, precision_at_k
+from .train_model import make_model
 
 TOP_K = 15
 
@@ -56,6 +57,7 @@ def evaluate(y, score, k: int = TOP_K) -> dict:
     top = np.argsort(-np.asarray(score))[:k]
     return {
         "auc": roc_auc_score(y, score),
+        "pr_auc": pr_auc(y, score),
         f"precision@{k}": precision,
         f"recall@{k}": y[top].sum() / y.sum(),
         "lift": precision / base,
@@ -109,11 +111,12 @@ def main():
     print(f"BASELINE COMPARISON  (held-out snapshot {test['as_of'].iloc[0]}, "
           f"{len(test)} active, {int(test['churned'].sum())} churn)")
     print("=" * 78)
-    print(f"{'method':<40}{'AUC':>7}{'prec@15':>9}{'recall@15':>11}{'lift':>7}")
+    print(f"{'method':<40}{'AUC':>7}{'PR-AUC':>8}{'prec@15':>9}{'recall@15':>11}{'lift':>7}")
     print("-" * 78)
-    print(f"{'pick at random':<40}{0.5:>7.2f}{base:>9.2f}{TOP_K / len(test):>11.2f}{1.0:>7.1f}x")
+    print(f"{'pick at random':<40}{0.5:>7.2f}{base:>8.3f}{base:>9.2f}"
+          f"{TOP_K / len(test):>11.2f}{1.0:>7.1f}x")
     for name, r in table.iterrows():
-        print(f"{name:<40}{r['auc']:>7.2f}{r[f'precision@{TOP_K}']:>9.2f}"
+        print(f"{name:<40}{r['auc']:>7.2f}{r['pr_auc']:>8.3f}{r[f'precision@{TOP_K}']:>9.2f}"
               f"{r[f'recall@{TOP_K}']:>11.2f}{r['lift']:>6.1f}x")
     print("=" * 78)
 
