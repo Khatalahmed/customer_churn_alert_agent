@@ -25,7 +25,7 @@ from sklearn.preprocessing import StandardScaler
 from .config import TEST_CUTOFF_DAYS, TRAIN_CUTOFFS_DAYS
 from .features import build_snapshots
 from .metrics import pr_auc, precision_at_k
-from .train_model import make_model
+from .train_model import calibrate, make_model
 
 TOP_K = 15
 
@@ -70,12 +70,18 @@ def compare(train: pd.DataFrame, test: pd.DataFrame, cols: list[str]) -> pd.Data
 
     logreg = logistic_pipeline().fit(train[cols], y_train)
     xgb = make_model(y_train).fit(train[cols], y_train)
+    # The comparison must score the model that actually SHIPS, which is the
+    # calibrated one. Calibration is a fold ensemble, not a monotonic rescale,
+    # so it changes the ranking slightly (PR-AUC 0.087 -> 0.069) - quoting the
+    # raw number in a table headed "this project" overstated what is deployed.
+    shipped = calibrate(xgb, train[cols], y_train, train["user_id"])
 
     scores = {
         "dormancy rule (days since last order)": dormancy_score(test),
         "login drop (prev 14d - last 14d)": login_drop_score(test),
         "logistic regression": logreg.predict_proba(test[cols])[:, 1],
-        "XGBoost (this project)": xgb.predict_proba(test[cols])[:, 1],
+        "XGBoost, raw scores (not shipped)": xgb.predict_proba(test[cols])[:, 1],
+        "XGBoost, calibrated (this project)": shipped.predict_proba(test[cols])[:, 1],
     }
     rows = {name: evaluate(y_test, s) for name, s in scores.items()}
     return pd.DataFrame(rows).T

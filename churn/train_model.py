@@ -66,8 +66,21 @@ def grouped_cv_aucs(X, y, groups, n_folds: int = 5, seed: int = 42) -> list[floa
 def calibrate(model, X, y, groups):
     """Platt-scale the scores so a "0.9" means roughly nine times out of ten.
 
-    Monotonic, so the ranking - and therefore precision@K - is unchanged.
     Uses the same grouped folds, so a customer is never calibrated on itself.
+
+    This does NOT preserve the ranking, and an earlier version of this
+    docstring wrongly claimed it did. CalibratedClassifierCV with cv=folds
+    fits one model per fold and AVERAGES their calibrated probabilities, so
+    the output is an ensemble, not a monotonic transform of a single model's
+    scores. Measured on the held-out snapshot: rank correlation 0.984,
+    PR-AUC 0.087 -> 0.069, precision@15 unchanged at 0.13, Brier 0.1020 ->
+    0.0135. That is why two PR-AUC figures for "XGBoost" exist in this repo,
+    and which one is quoted now says which model it is.
+
+    The genuinely rank-preserving alternative - fit once, calibrate on a
+    held-out slice (FrozenEstimator) - was measured too: rank correlation
+    1.000, but it costs 20% of the training customers and precision@15 falls
+    to 0.067. Ranking quality is bought with data here, so the ensemble stays.
     """
     calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=grouped_folds(X, y, groups))
     calibrated.fit(X, y)

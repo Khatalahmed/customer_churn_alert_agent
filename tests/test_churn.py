@@ -817,3 +817,25 @@ def test_planning_falls_back_to_predictions_when_the_control_is_empty():
     assert round(rate, 4) == 0.12 and "calibrated" in basis
     rate, basis = planning_base_rate(log, control_churned=9, control_n=60)
     assert rate == 0.15 and basis == "observed control churn rate"
+
+
+def test_baselines_scores_the_model_that_ships():
+    # The comparison used to fit a raw booster and label it "this project",
+    # so its PR-AUC (0.087) disagreed with the trained model's (0.069).
+    from churn.baselines import compare
+    import pandas as pd
+    rng = np.random.default_rng(0)
+    n = 400
+    df = pd.DataFrame({
+        "user_id": np.arange(n),
+        "days_since_last_order": rng.gamma(2, 5, n),
+        "logins_last_14d": rng.poisson(3, n),
+        "logins_prev_14_28d": rng.poisson(3, n),
+        "unresolved_ticket_rate": rng.random(n),
+    })
+    df["churned"] = (df["unresolved_ticket_rate"] > 0.8).astype(int)
+    cols = ["days_since_last_order", "logins_last_14d",
+            "logins_prev_14_28d", "unresolved_ticket_rate"]
+    table = compare(df, df.copy(), cols)
+    assert "XGBoost, calibrated (this project)" in table.index
+    assert "XGBoost, raw scores (not shipped)" in table.index
