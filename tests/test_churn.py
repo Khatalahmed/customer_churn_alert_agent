@@ -144,6 +144,80 @@ def test_azure_provider_is_keyless_and_configured_from_env(monkeypatch):
         get_model()
 
 
+def _good_trace(user_ids):
+    """The trace a correct run produces: rank once, then tickets+reviews each."""
+    calls = [{"tool": "get_churn_candidates", "args": {"top_n": len(user_ids)}, "ok": True, "ms": 40}]
+    for uid in user_ids:
+        calls.append({"tool": "get_user_tickets", "args": {"user_id": uid}, "ok": True, "ms": 5})
+        calls.append({"tool": "get_user_reviews", "args": {"user_id": uid}, "ok": True, "ms": 5})
+    return calls
+
+
+def _failing_rules(calls, preds):
+    from churn.trace_eval import check_trajectory
+    return {r["rule"] for r in check_trajectory(calls, preds) if not r["passed"]}
+
+
+def test_trajectory_passes_on_a_correct_run():
+    ids = [1, 2, 3]
+    preds = [_pred(uid, "HIGH") for uid in ids]
+    assert _failing_rules(_good_trace(ids), preds) == set()
+
+
+def test_trajectory_catches_each_kind_of_bug():
+    ids = [1, 2, 3]
+    preds = [_pred(uid, "HIGH") for uid in ids]
+
+    # skipped the review check for user 3
+    calls = [c for c in _good_trace(ids)
+             if not (c["tool"] == "get_user_reviews" and c["args"].get("user_id") == 3)]
+    assert "checked reviews for every customer" in _failing_rules(calls, preds)
+
+    # investigated someone who was never shortlisted
+    calls = _good_trace(ids) + [{"tool": "get_user_tickets", "args": {"user_id": 99}, "ok": True}]
+    assert "investigated nobody off the shortlist" in _failing_rules(calls, preds)
+
+    # looped on the same customer
+    calls = _good_trace(ids) + [{"tool": "get_user_tickets", "args": {"user_id": 1}, "ok": True}]
+    assert "no customer investigated twice" in _failing_rules(calls, preds)
+
+    # investigated before ranking
+    ranker, *rest = _good_trace(ids)
+    calls = rest + [ranker]
+    assert "ranks before investigating" in _failing_rules(calls, preds)
+
+    # ranked twice
+    calls = _good_trace(ids) + [{"tool": "get_churn_candidates", "args": {"top_n": 3}, "ok": True}]
+    assert "ranks exactly once" in _failing_rules(calls, preds)
+
+    # reached for a tool it was never given
+    calls = _good_trace(ids) + [{"tool": "run_sql", "args": {}, "ok": True}]
+    assert "used only the tools it was given" in _failing_rules(calls, preds)
+
+    # a tool call errored
+    calls = _good_trace(ids)
+    calls[1] = {**calls[1], "ok": False}
+    assert "no tool call errored" in _failing_rules(calls, preds)
+
+
+def test_rubric_verdicts_do_not_drift():
+    # regression eval: these fact patterns must always produce these verdicts
+    from churn.rubric import assess
+    golden = {
+        ("complaint + fading", 2, 0, 10, 1): "HIGH",
+        ("low review + silent", 0, 1, 0, 0): "HIGH",
+        ("complaint + engaged", 1, 0, 2, 9): "MEDIUM",
+        ("happy + fading", 0, 5, 10, 1): "MEDIUM",
+        ("happy + engaged", 0, 5, 2, 9): "LOW",
+        ("silent reviews + engaged", 0, 0, 2, 9): "LOW",
+        ("3-star + engaged", 0, 3, 2, 9): "LOW",
+    }
+    for (label, serious, worst, prev, recent), expected in golden.items():
+        facts = {"unresolved_serious_tickets": serious, "worst_review_rating": worst,
+                 "logins_prev_30_60d": prev, "logins_recent_30d": recent}
+        assert assess(facts)["risk_level"] == expected, label
+
+
 def test_metrics_precision_recall_and_pr_auc():
     from churn.metrics import calibration_table, pr_auc, precision_at_k, recall_at_k
     y = np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0])          # base rate 0.2

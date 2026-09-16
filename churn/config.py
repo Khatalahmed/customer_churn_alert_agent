@@ -22,6 +22,7 @@ PREDICTIONS_PATH = DATA_DIR / "churn_predictions.json"
 REVIEWED_PATH = DATA_DIR / "churn_predictions_reviewed.json"
 CONTACTED_PATH = DATA_DIR / "contacted.json"
 REPORT_PATH = DATA_DIR / "retention_report.md"
+TRACE_PATH = DATA_DIR / "agent_trace.json"      # tool calls of the last agent run
 
 # --- point-in-time prediction setup -------------------------------------------
 # At a cutoff time T the model sees ONLY data from before T and predicts whether

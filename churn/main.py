@@ -20,8 +20,9 @@ import json
 from deepagents import create_deep_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-from .config import PREDICTIONS_PATH, connect_readonly
+from .config import PREDICTIONS_PATH, TRACE_PATH, connect_readonly
 from .rubric import assess
+from .trace import ToolTraceMiddleware
 from .pii import PIIRedactionMiddleware
 from .utils import get_model, token_prices
 from .scoring import get_churn_candidates
@@ -37,6 +38,8 @@ from .schemas import ChurnReport
 
 # one PII-redaction middleware instance, shared by all sub-agents
 pii_mw = PIIRedactionMiddleware()
+# records every tool call, so churn.trace_eval can grade HOW the run happened
+trace_mw = ToolTraceMiddleware()
 
 # The three sub-agents. Each is a simple dictionary. The manager calls them
 # by name through its built-in "task" tool.
@@ -50,7 +53,7 @@ SUBAGENTS = [
         ),
         "system_prompt": RISK_RANKER_PROMPT,
         "tools": [get_churn_candidates],
-        "middleware": [pii_mw],
+        "middleware": [pii_mw, trace_mw],
     },
     {
         "name": "ticket-analyst",
@@ -60,7 +63,7 @@ SUBAGENTS = [
         ),
         "system_prompt": TICKET_PROMPT,
         "tools": [get_user_tickets],
-        "middleware": [pii_mw],
+        "middleware": [pii_mw, trace_mw],
     },
     {
         "name": "review-analyst",
@@ -70,7 +73,7 @@ SUBAGENTS = [
         ),
         "system_prompt": REVIEW_PROMPT,
         "tools": [get_user_reviews],
-        "middleware": [pii_mw],
+        "middleware": [pii_mw, trace_mw],
     },
 ]
 
@@ -144,6 +147,8 @@ if __name__ == "__main__":
     with open(PREDICTIONS_PATH, "w") as f:
         json.dump(predictions, f, indent=2)
     print(f"\nSaved {len(predictions)} predictions to {PREDICTIONS_PATH}")
+    print(f"Saved {trace_mw.save(TRACE_PATH)} tool calls to {TRACE_PATH} "
+          f"(grade them: python -m churn.trace_eval)")
 
     # --- cost of this run (token usage x the provider prices set in .env) ---
     USD_TO_INR = 83

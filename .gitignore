@@ -24,6 +24,7 @@ Thumbs.db
 *.pkl
 churn_truth.json
 churn_predictions.json
+agent_trace.json
 churn_predictions_reviewed.json
 contacted.json
 retention_report.md
