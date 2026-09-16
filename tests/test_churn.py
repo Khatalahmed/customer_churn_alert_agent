@@ -144,6 +144,39 @@ def test_azure_provider_is_keyless_and_configured_from_env(monkeypatch):
         get_model()
 
 
+def test_rubric_truth_table():
+    # the whole risk decision, in code: two signals -> three levels
+    from churn.rubric import assess
+    complaint = {"unresolved_serious_tickets": 1, "worst_review_rating": 0}
+    low_review = {"unresolved_serious_tickets": 0, "worst_review_rating": 2}
+    happy = {"unresolved_serious_tickets": 0, "worst_review_rating": 5}
+    fading = {"logins_prev_30_60d": 10, "logins_recent_30d": 2}
+    silent = {"logins_prev_30_60d": 0, "logins_recent_30d": 0}
+    active = {"logins_prev_30_60d": 2, "logins_recent_30d": 9}
+
+    assert assess(complaint | fading)["risk_level"] == "HIGH"
+    assert assess(low_review | silent)["risk_level"] == "HIGH"
+    assert assess(complaint | active)["risk_level"] == "MEDIUM"   # unhappy but engaged
+    assert assess(happy | fading)["risk_level"] == "MEDIUM"       # quiet but content
+    assert assess(happy | active)["risk_level"] == "LOW"
+    # things that must NOT count as dissatisfaction
+    no_reviews = {"unresolved_serious_tickets": 0, "worst_review_rating": 0}
+    three_star = {"unresolved_serious_tickets": 0, "worst_review_rating": 3}
+    assert assess(no_reviews | active)["risk_level"] == "LOW"     # silence is not unhappiness
+    assert assess(three_star | active)["risk_level"] == "LOW"
+    # the action follows the level
+    assert assess(complaint | fading)["suggested_action"] == "retention call"
+    assert assess(happy | active)["suggested_action"] == "ignore"
+
+
+def test_agent_schema_cannot_set_the_risk_level():
+    # the LLM reports evidence and reasoning; the verdict is code's job
+    from churn.schemas import ChurnAssessment
+    fields = ChurnAssessment.model_fields
+    assert "risk_level" not in fields and "suggested_action" not in fields
+    assert "evidence" in fields and "reason" in fields
+
+
 def test_baseline_evaluate_scores_a_perfect_ranking():
     from churn.baselines import evaluate
     y = np.array([1, 1] + [0] * 8)                  # base rate 0.2
@@ -239,8 +272,8 @@ def test_verifier_accepts_true_facts_and_flags_wrong_ones():
     bad = {**good, "total_orders": good["total_orders"] + 1}
     result = verify(conn, [_pred(uid, "HIGH", good), _pred(uid, "HIGH", bad)])
     conn.close()
-    assert result["total_fields"] == 10
-    assert result["matched_fields"] == 9
+    assert result["total_fields"] == 12          # 6 checked facts x 2 predictions
+    assert result["matched_fields"] == 11
     assert list(result["mismatches"]) == [uid]
 
 

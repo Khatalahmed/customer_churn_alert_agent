@@ -3,10 +3,11 @@ main.py
 
 WHAT : This is the main program. It builds the deep agent (the manager) and
        its sub-agents, then runs one churn analysis and reports the run cost.
-WHY  : The ML model scores all customers cheaply and ranks them by priority
-       (churn risk x value). The agent then investigates only the top ones.
-       This is the full hybrid: ML predicts, the agent investigates, and
-       both feed the final decision. We also track token cost per run.
+WHY  : The ML model scores every active customer cheaply and shortlists the
+       riskiest. The agent then investigates only those. Division of labour:
+       the MODEL decides who is at risk, the RUBRIC (code) decides the risk
+       level from verified facts, and the LLM explains the evidence in plain
+       language - the one part it is reliably good at.
 FLOW : build model -> define the sub-agents (risk-ranker, ticket, review) ->
        build the deep agent -> run the task -> print report -> save
        predictions -> print the token cost of the run.
@@ -19,11 +20,13 @@ import json
 from deepagents import create_deep_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-from .config import PREDICTIONS_PATH
+from .config import PREDICTIONS_PATH, connect_readonly
+from .rubric import assess
 from .pii import PIIRedactionMiddleware
 from .utils import get_model, token_prices
 from .scoring import get_churn_candidates
 from .tools import get_user_tickets, get_user_reviews
+from .verifier import real_facts
 from .prompts import (
     RISK_RANKER_PROMPT,
     TICKET_PROMPT,
@@ -121,17 +124,23 @@ if __name__ == "__main__":
     # The structured output lives in result["structured_response"].
     report: ChurnReport = result["structured_response"]
 
+    # --- the VERDICT is decided HERE, in code, from facts re-queried from the
+    # database - not by the LLM. The agent supplied evidence and explanations.
+    conn = connect_readonly()
+    predictions = []
+    for a in report.assessments:
+        verdict = assess(real_facts(conn, a.user_id))
+        predictions.append({**a.model_dump(), **verdict})
+    conn.close()
+
     # Print a readable summary.
     print("\n" + "=" * 70)
-    print("CHURN ASSESSMENTS")
+    print("CHURN ASSESSMENTS  (risk level computed by churn.rubric)")
     print("=" * 70)
-    for a in report.assessments:
-        print(f"[{a.risk_level:<6}] user {a.user_id:>3} {a.full_name:<18} "
-              f"prob={a.churn_probability:.2f} -> {a.suggested_action}")
-        print(f"         reason: {a.reason}")
-
-    # Save the machine-readable predictions for the eval and verifier scripts.
-    predictions = [a.model_dump() for a in report.assessments]
+    for p in predictions:
+        print(f"[{p['risk_level']:<6}] user {p['user_id']:>4} {p['full_name']:<18} "
+              f"prob={p['churn_probability']:.2f} -> {p['suggested_action']}")
+        print(f"          reason: {p['reason']}")
     with open(PREDICTIONS_PATH, "w") as f:
         json.dump(predictions, f, indent=2)
     print(f"\nSaved {len(predictions)} predictions to {PREDICTIONS_PATH}")

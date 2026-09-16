@@ -11,8 +11,6 @@ LOGIC: The agent returns one assessment per customer it investigated. Each
        assessment carries an Evidence block with plain numbers, so nothing
        is hidden inside prose.
 """
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 
@@ -26,24 +24,28 @@ class Evidence(BaseModel):
     logins_recent_30d: int = Field(description="Login count in the last 30 days")
     total_orders: int = Field(description="Total orders the customer has ever placed")
     total_tickets: int = Field(description="Total support tickets the customer raised")
+    unresolved_serious_tickets: int = Field(
+        description="Unresolved tickets about delivery, payment, refund, quality or a wrong order"
+    )
     worst_review_rating: int = Field(
         description="The lowest review rating (1 to 5). Use 0 if the customer has no reviews."
     )
 
 
 class ChurnAssessment(BaseModel):
-    """One customer's churn assessment."""
+    """One customer's findings. The RISK LEVEL is not here on purpose: it is
+    computed in code by churn.rubric from the verified facts, so it is
+    reproducible. The agent supplies the evidence and the explanation."""
     user_id: int = Field(description="The customer's user_id")
     full_name: str = Field(description="The customer's name")
-    risk_level: Literal["HIGH", "MEDIUM", "LOW"] = Field(
-        description="HIGH or MEDIUM means likely to churn. LOW means safe."
-    )
     churn_probability: float = Field(
         description="The ML model's churn probability (0 to 1), from get_churn_candidates"
     )
-    evidence: Evidence = Field(description="The exact numbers behind the risk level")
-    reason: str = Field(description="Short, evidence-based reason for the risk level")
-    suggested_action: str = Field(description="coupon, retention call, or ignore")
+    evidence: Evidence = Field(description="The exact numbers found for this customer")
+    reason: str = Field(
+        description="Short, evidence-based summary of what the tickets and reviews show. "
+                    "Do NOT state a risk level - that is decided in code."
+    )
 
     
 class ChurnReport(BaseModel):

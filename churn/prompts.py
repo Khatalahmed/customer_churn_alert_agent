@@ -7,9 +7,9 @@ WHAT : This file holds the instructions (prompts) for our agents. There
 WHY  : The prompt is where each agent's job is defined. We keep all four
        in one file so the design is easy to read and easy to change.
 LOGIC: Each sub-agent has ONE job only. The deep agent does not touch the
-       database itself. It only makes a plan and asks the sub-agents to
-       do the work, then it collects their answers and scores each
-       customer.
+       database itself - it plans, delegates, and explains what the evidence
+       shows. It does NOT assign the risk level: churn.rubric does that in
+       code, from facts re-queried from the database.
 """
 
 # --- Sub-agent 0: ML risk ranker (replaces the old inactivity-analyst) ---
@@ -37,7 +37,7 @@ delivery delays, or payment issues.
 
 Start your answer with this line, copying the numbers EXACTLY from the tool
 output (do not count the tickets yourself):
-total_tickets: <total_tickets>, unresolved_tickets: <unresolved_tickets>
+total_tickets: <total_tickets>, unresolved_tickets: <unresolved_tickets>, unresolved_serious_tickets: <unresolved_serious_tickets>
 
 Then decide if the customer looks UNHAPPY or FINE. Only UNRESOLVED tickets
 (status OPEN, IN_PROGRESS or WAITING_ON_CUSTOMER) about delivery, payment,
@@ -81,29 +81,24 @@ Follow these steps:
    each customer's churn_probability, login trend, and total orders.
 3. For EACH candidate, call ticket-analyst and review-analyst with that
    customer's user_id, so you gather ticket and review evidence.
-4. For each customer, decide a final churn risk level. Every candidate already
-   has a high ML probability, so the probability alone must NOT decide the level -
-   your job is to check whether the evidence supports it. Look for two signals:
+4. For each customer, write a short `reason`: what the tickets and reviews
+   actually show. Name the two things a retention team cares about:
    - DISSATISFACTION: an UNRESOLVED ticket about delivery, payment, refund,
      product quality or a wrong/missing order, OR a review rated 2 stars or less.
-   - DISENGAGEMENT: logins_recent_30d is lower than logins_prev_30_60d, or both
-     are 0.
-   Then decide:
-   - HIGH   = both signals are present.
-   - MEDIUM = exactly one signal is present.
-   - LOW    = neither signal is present. Downgrading to LOW is expected when the
-              evidence does not back the model.
-   These are NOT dissatisfaction: having no reviews (silence), resolved or
-   closed tickets, general account questions, or 3-star-and-above reviews.
-   Rising logins are engagement, not disengagement.
-   Name the signals you found (or did not find) in the reason.
-5. Return one assessment per customer you investigated.
+     These do NOT count: no reviews at all (silence), resolved or closed tickets,
+     general account questions, 3-star-and-above reviews.
+   - DISENGAGEMENT: logins_recent_30d lower than logins_prev_30_60d, or both 0.
+     Rising logins are engagement, not disengagement.
+   Do NOT state a risk level and do NOT recommend an action. The risk level is
+   computed in code from your evidence numbers, so what matters is that the
+   numbers are right and the reason explains them.
+5. Return one entry per customer you investigated.
 
 IMPORTANT rules:
 - Copy churn_probability from the risk-ranker output. Do not change it.
 - Fill the evidence block by COPYING numbers, never by counting:
   logins_prev_30_60d, logins_recent_30d, total_orders from risk-ranker;
-  total_tickets from the "total_tickets:" line of ticket-analyst;
+  total_tickets and unresolved_serious_tickets from the ticket-analyst line;
   worst_review_rating from the "worst_review_rating:" line of review-analyst
   (it is already 0 when the customer has no reviews).
 - The numbers must be true, because they are checked against the database.

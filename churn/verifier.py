@@ -17,6 +17,7 @@ LOGIC: We query the database ourselves, on purpose, so the check does not
 import json
 
 from .config import PREDICTIONS_PATH, analysis_time, connect_readonly
+from .rubric import SERIOUS_CATEGORIES
 
 
 def real_facts(conn, user_id, as_of=None):
@@ -43,6 +44,13 @@ def real_facts(conn, user_id, as_of=None):
     tickets = cur.execute(
         "SELECT COUNT(*) FROM support_tickets WHERE user_id=? AND created_at < ?", (user_id, as_of)
     ).fetchone()[0]
+    serious = cur.execute(
+        f"""SELECT COUNT(*) FROM support_tickets
+            WHERE user_id=? AND created_at < ?
+              AND (resolved_at IS NULL OR resolved_at >= ?)
+              AND category IN ({','.join('?' * len(SERIOUS_CATEGORIES))})""",
+        (user_id, as_of, as_of, *SERIOUS_CATEGORIES),
+    ).fetchone()[0]
     worst = cur.execute(
         "SELECT MIN(rating) FROM reviews WHERE user_id=? AND created_at < ?", (user_id, as_of)
     ).fetchone()[0]
@@ -52,6 +60,7 @@ def real_facts(conn, user_id, as_of=None):
         "logins_recent_30d": recent,
         "total_orders": orders,
         "total_tickets": tickets,
+        "unresolved_serious_tickets": serious,
         "worst_review_rating": worst,
     }
 

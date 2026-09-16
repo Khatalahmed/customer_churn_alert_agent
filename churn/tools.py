@@ -20,6 +20,7 @@ import sqlite3
 from langchain.tools import tool
 
 from .config import analysis_time, connect_readonly
+from .rubric import SERIOUS_CATEGORIES
 
 UNRESOLVED = ("OPEN", "IN_PROGRESS", "WAITING_ON_CUSTOMER")
 
@@ -62,9 +63,12 @@ def get_user_tickets(user_id: int) -> str:
             t.update(status="OPEN", resolution_notes=None, resolved_at=None)
     # counted here, in code, so the LLM copies the number instead of counting
     unresolved = sum(1 for t in tickets if t["status"] in UNRESOLVED)
+    serious = sum(1 for t in tickets
+                  if t["status"] in UNRESOLVED and t["category"] in SERIOUS_CATEGORIES)
     return json.dumps({
         "analysis_time": as_of,
         "total_tickets": len(tickets),
+        "unresolved_serious_tickets": serious,
         "unresolved_tickets": unresolved,
         "tickets": tickets,
     }, indent=2)
