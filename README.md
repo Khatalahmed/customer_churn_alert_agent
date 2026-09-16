@@ -18,14 +18,14 @@ Built to prove a point: **measure everything, including the techniques that fail
 <tr>
 <td align="center"><b>0.83</b><br><sub>ROC-AUC<br><i>out-of-time, 14 days ahead</i></sub></td>
 <td align="center"><b>9.5x</b><br><sub>better than random<br><i>@ top-15</i></sub></td>
-<td align="center"><b>100%*</b><br><sub>evidence<br><i>fidelity</i></sub></td>
-<td align="center"><b>~270k*</b><br><sub>tokens<br><i>per scan</i></sub></td>
+<td align="center"><b>100%</b><br><sub>evidence<br><i>fidelity</i></sub></td>
+<td align="center"><b>~276k</b><br><sub>tokens<br><i>per scan</i></sub></td>
 </tr>
 </table>
 
-<sub>Model numbers are reproducible and checked in CI. *Agent numbers are from a live
-<code>gpt-6-astra</code> (Azure OpenAI) run on an <b>earlier, smaller dataset</b> — not re-run
-since. See [Agent metrics](#agent-metrics).</sub>
+<sub>Model numbers are reproducible and checked in CI. Agent numbers come from one live
+<code>gpt-6-astra</code> (Azure OpenAI) run on this same dataset — see
+[Agent metrics](#agent-metrics).</sub>
 
 </div>
 
@@ -51,10 +51,11 @@ Cheap ML scores everyone. Expensive AI investigates only the few that matter.
 | **1 · Predict** | XGBoost model | ~free | **every active** customer (~2,500) |
 | **2 · Investigate** | LLM deep agent + 3 sub-agents | ~270k tokens/scan | **top 15** by churn risk |
 
-The agent **checks** the model rather than trusting it: it downgrades a "high risk" flag when
-the tickets and reviews don't back it up. On its last run it dropped 5 of 15 customers to LOW —
-4 rightly, 1 a real churner it talked itself out of (see [Agent metrics](#agent-metrics); that
-run predates the current dataset).
+The agent **checks** the model rather than trusting it: it downgrades a flag when the tickets
+and reviews don't back it up. On the latest run it issued **no HIGH verdicts at all** — 14
+MEDIUM and one LOW — because its rubric needs *both* an unresolved complaint and falling
+logins, and almost every shortlisted customer had complaints while still logging in (see
+[Agent metrics](#agent-metrics)).
 
 ```mermaid
 flowchart LR
@@ -71,23 +72,25 @@ flowchart LR
 
 ## What it produces
 
-One command → an evidence-backed retention worklist (real output, `gpt-6-astra`, earlier dataset):
+One command → an evidence-backed retention worklist (real output, `gpt-6-astra`):
 
 ```text
-[HIGH  ] user   6 Priya Nair    prob=0.91 -> retention call
-  reason: Both signals are present: an open missing-items ticket establishes
-          dissatisfaction despite a 5-star review, and logins fell from 13 to 2,
-          showing disengagement.
+[MEDIUM] user 1908 Ananya Nair  prob=0.92 -> retention call
+  reason: Dissatisfaction: unresolved delivery, payment, and refund issues, plus
+          2-star reviews about quality and leaking packaging. No disengagement:
+          logins rose from 0 to 17, supporting MEDIUM rather than HIGH.
 
-[LOW   ] user 291 Kavya Menon   prob=0.60 -> ignore
-  reason: Neither signal is present: no tickets or reviews establish dissatisfaction,
-          and logins increased from 0 to 1 rather than showing disengagement.
+[LOW   ] user  726 Tara Gupta   prob=0.89 -> ignore
+  reason: No dissatisfaction: the unresolved ticket is a general account question,
+          the quality complaint is closed, and the review is 3 stars. No
+          disengagement: logins rose from 0 to 8. Neither signal supports the high
+          ML probability.
 ```
 
 Then it **grades itself** — no guessing:
 
 ```text
-Precision (agent)  : 0.20     (2 of 10 escalations churned in the next 14 days)
+Precision (agent)  : 0.14     (2 of 14 escalations churned in the next 14 days)
 Evidence fidelity  : 100%     (75/75 cited facts matched the database)
 Uplift method check: a hold-out test recovers the planted coupon effect (+31 pts)
                      on average, but one test on 78 churners ranges +14 to +47 pts
@@ -95,31 +98,30 @@ Uplift method check: a hold-out test recovers the planted coupon effect (+31 pts
 
 ### Agent metrics
 
-> ⚠️ **These numbers are stale.** They come from a live run on the **previous, smaller
-> dataset** (300 customers, before the simulator learned to time churn from bad experiences).
-> The model numbers above have since been re-measured; the agent has not, because each run
-> costs a real LLM call. Re-run the three commands below to refresh them.
-
 Measured in one live run on **`gpt-6-astra` via Azure OpenAI** (Responses API, keyless
-Entra ID auth), analysis time 2026-08-04:
+Entra ID auth) against this dataset, analysis time 2026-08-04, ~2 minutes:
 
 | Metric | Result |
 |---|---|
-| Precision (agent verdicts) | **0.20** — 2 of 10 flagged customers churned within 14 days |
-| Recall | 0.12 — 2 of the 16 churners; only 15 customers are investigated per scan |
+| Precision (agent verdicts) | **0.14** — 2 of 14 flagged customers churned within 14 days |
+| Recall | 0.06 — 2 of the 35 churners; only 15 customers are investigated per scan |
 | Evidence fidelity | **100%** — all 75 cited numbers matched the database |
-| Tokens per scan | 264,087 in / 8,333 out |
+| Tokens per scan | 266,938 in / 9,287 out |
 
-**What the agent changed.** It downgraded 5 of the 15 to LOW: 4 correctly, and 1 (user 173)
-was a real churner it argued away because logins had risen. Precision therefore stayed level
-with the shortlist it was given (0.20), while recall fell from 3 to 2. A tightened rubric —
-HIGH needs *both* an unresolved complaint and falling logins — is what made it willing to say
-LOW at all; before that it flagged every customer it looked at.
+**The agent stopped shouting.** It returned **no HIGH verdicts** — 14 MEDIUM and one LOW.
+Its rubric requires *both* an unresolved complaint and falling logins for HIGH, and nearly
+every shortlisted customer had complaints while still logging in (one had risen from 0 to 17
+logins). An earlier, looser prompt flagged all 15 as HIGH; this one says "worth a call, but
+they haven't disengaged yet", which is a more useful thing to tell a retention team.
 
-**What the shortlist actually contained.** Of the 15 customers ranked highest: 3 churn in the
-next 14 days, **4 had already churned** before the cutoff (quiet for under 28 days, so still
-counted as active — the model spotted them, just late), and 8 never churn. The strict label
-counts those 4 as false alarms; a retention team would still want to call them.
+**It did not improve precision.** 0.14 against the shortlist's 0.13 — the investigation adds
+evidence and explanations rather than filtering. On the previous dataset it also talked itself
+out of one real churner. That is the honest state of this hybrid: the ML layer decides *who*,
+and the agent explains *why*.
+
+**What the shortlist contained.** Of 2,561 customers scored, 74 had already churned before the
+cutoff — the model often ranks them highly (correctly, just late), but the strict label counts
+them as false alarms.
 
 These numbers need a live LLM call, so CI does **not** regenerate them, and LLM output varies
 between runs. To refresh them:
