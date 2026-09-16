@@ -160,6 +160,10 @@ The browser talks to the Next app; the Next app talks to FastAPI. The service ad
 reaches client code. Screenshots in this README are captured from the running pair by
 `frontend/scripts/screenshots.mjs`, so they cannot drift from what the app actually renders.
 
+To host the pair for free — the API on a Hugging Face Space, the interface on Vercel —
+follow [`docs/DEPLOY.md`](docs/DEPLOY.md). The Space rebuilds the database and the model from
+the seeded simulator at build time, so nothing large is ever uploaded.
+
 ---
 
 ## Results

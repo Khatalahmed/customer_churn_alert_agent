@@ -1,0 +1,252 @@
+{
+  "calls": [
+    {
+      "tool": "get_churn_candidates",
+      "args": {
+        "top_n": 15
+      },
+      "ok": true,
+      "ms": 1771
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 961
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 2426
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 527
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 1174
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 2414
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 104
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 527
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 2414
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 104
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 1174
+      },
+      "ok": true,
+      "ms": 7
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 2426
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 961
+      },
+      "ok": true,
+      "ms": 3
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 335
+      },
+      "ok": true,
+      "ms": 3
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 335
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 1406
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 726
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 2852
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 760
+      },
+      "ok": true,
+      "ms": 6
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 760
+      },
+      "ok": true,
+      "ms": 13
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 726
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 1406
+      },
+      "ok": true,
+      "ms": 5
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 2714
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 2714
+      },
+      "ok": true,
+      "ms": 19
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 1908
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 2852
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 2399
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 1003
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 1003
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_tickets",
+      "args": {
+        "user_id": 2399
+      },
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "tool": "get_user_reviews",
+      "args": {
+        "user_id": 1908
+      },
+      "ok": true,
+      "ms": 2
+    }
+  ]
+}
