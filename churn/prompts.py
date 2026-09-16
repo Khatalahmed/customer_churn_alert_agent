@@ -87,7 +87,7 @@ Follow these steps:
      product quality or a wrong/missing order, OR a review rated 2 stars or less.
      These do NOT count: no reviews at all (silence), resolved or closed tickets,
      general account questions, 3-star-and-above reviews.
-   - DISENGAGEMENT: logins_recent_30d lower than logins_prev_30_60d, or both 0.
+   - DISENGAGEMENT: logins_last_14d lower than logins_prev_14_28d, or both 0.
      Rising logins are engagement, not disengagement.
    Do NOT state a risk level and do NOT recommend an action. The risk level is
    computed in code from your evidence numbers, so what matters is that the
@@ -97,7 +97,7 @@ Follow these steps:
 IMPORTANT rules:
 - Copy churn_probability from the risk-ranker output. Do not change it.
 - Fill the evidence block by COPYING numbers, never by counting:
-  logins_prev_30_60d, logins_recent_30d, total_orders from risk-ranker;
+  logins_prev_14_28d, logins_last_14d, total_orders from risk-ranker;
   total_tickets and unresolved_serious_tickets from the ticket-analyst line;
   worst_review_rating from the "worst_review_rating:" line of review-analyst
   (it is already 0 when the customer has no reviews).

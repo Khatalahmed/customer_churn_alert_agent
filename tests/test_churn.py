@@ -215,7 +215,7 @@ def test_rubric_verdicts_do_not_drift():
     }
     for (label, serious, worst, prev, recent), expected in golden.items():
         facts = {"unresolved_serious_tickets": serious, "worst_review_rating": worst,
-                 "logins_prev_30_60d": prev, "logins_recent_30d": recent}
+                 "logins_prev_14_28d": prev, "logins_last_14d": recent}
         assert assess(facts)["risk_level"] == expected, label
 
 
@@ -296,7 +296,7 @@ def test_api_serves_health_worklist_and_one_customer(tmp_path, monkeypatch):
     # one customer, with the reason a CRM would show
     detail = client.get(f"/customers/{first['user_id']}").json()
     assert detail["user_id"] == first["user_id"]
-    assert detail["evidence"]["logins_recent_30d"] >= 0
+    assert detail["evidence"]["logins_last_14d"] >= 0
 
     # a customer who is not active gets a 404 that explains itself
     missing = client.get("/customers/999999")
@@ -406,9 +406,9 @@ def test_rubric_truth_table():
     complaint = {"unresolved_serious_tickets": 1, "worst_review_rating": 0}
     low_review = {"unresolved_serious_tickets": 0, "worst_review_rating": 2}
     happy = {"unresolved_serious_tickets": 0, "worst_review_rating": 5}
-    fading = {"logins_prev_30_60d": 10, "logins_recent_30d": 2}
-    silent = {"logins_prev_30_60d": 0, "logins_recent_30d": 0}
-    active = {"logins_prev_30_60d": 2, "logins_recent_30d": 9}
+    fading = {"logins_prev_14_28d": 10, "logins_last_14d": 2}
+    silent = {"logins_prev_14_28d": 0, "logins_last_14d": 0}
+    active = {"logins_prev_14_28d": 2, "logins_last_14d": 9}
 
     assert assess(complaint | fading)["risk_level"] == "HIGH"
     assert assess(low_review | silent)["risk_level"] == "HIGH"
@@ -839,3 +839,49 @@ def test_baselines_scores_the_model_that_ships():
     table = compare(df, df.copy(), cols)
     assert "XGBoost, calibrated (this project)" in table.index
     assert "XGBoost, raw scores (not shipped)" in table.index
+
+
+def test_every_login_window_in_the_system_is_the_same_window():
+    # The model's features, the agent's evidence and the verifier used to
+    # disagree: 14/28-day windows in one place, 30/60 in the other, so the
+    # sentence explaining a prediction described a different fortnight.
+    from churn.config import (LOGIN_PREV_FIELD, LOGIN_RECENT_FIELD,
+                              connect_readonly, analysis_time)
+    from churn.features import FEATURE_COLS, build_features
+    from churn.logins import login_counts
+    from churn.verifier import real_facts
+
+    assert LOGIN_RECENT_FIELD in FEATURE_COLS and LOGIN_PREV_FIELD in FEATURE_COLS
+
+    conn = connect_readonly()
+    as_of = analysis_time(conn)
+    df, _ = build_features(as_of=as_of)
+    uid = int(df.iloc[0]["user_id"])
+    facts = real_facts(conn, uid, as_of)
+    prev, recent = login_counts(conn, uid, as_of)
+    conn.close()
+
+    row = df[df["user_id"] == uid].iloc[0]
+    assert facts[LOGIN_RECENT_FIELD] == recent == row[LOGIN_RECENT_FIELD]
+    assert facts[LOGIN_PREV_FIELD] == prev == row[LOGIN_PREV_FIELD]
+
+
+def test_login_windows_do_not_double_count_the_boundary(tmp_path):
+    # The old query used SQL BETWEEN for the earlier window, which is
+    # inclusive at both ends, so a login landing exactly on the boundary was
+    # counted in both windows at once.
+    import sqlite3
+    from churn.config import LOGIN_RECENT_DAYS
+    from churn.logins import login_counts
+    db = tmp_path / "t.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE auth_audit_log (user_id INT, event_type TEXT, event_timestamp TEXT)")
+    as_of = "2026-08-04 06:30:00"
+    boundary = conn.execute("SELECT datetime(?, ?)",
+                            (as_of, f"-{LOGIN_RECENT_DAYS} days")).fetchone()[0]
+    conn.execute("INSERT INTO auth_audit_log VALUES (1, 'LOGIN', ?)", (boundary,))
+    conn.commit()
+    prev, recent = login_counts(conn, 1, as_of)
+    conn.close()
+    assert prev + recent == 1, "one login must land in exactly one window"
+    assert recent == 1, "the boundary belongs to the recent, half-open window"

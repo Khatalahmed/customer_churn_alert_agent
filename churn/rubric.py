@@ -16,7 +16,17 @@ LOGIC: two independent signals, each answerable from the database.
          either.
        HIGH = both, MEDIUM = one, LOW = neither. A high ML probability alone
        never makes a customer HIGH: the evidence has to back it.
+NOTE : the disengagement half does NOT predict churn here, and pretending
+       otherwise would be dishonest. Measured on the held-out snapshot, the
+       customers whose logins fell churn at 0.91% against a 1.41% base rate -
+       lift 0.64x, i.e. worse than picking at random, the same finding as the
+       login-drop baseline. It stays because it decides WHAT TO DO, not WHO to
+       pick: the model has already chosen the shortlist, and a complainer who
+       is also drifting away needs a conversation rather than a coupon. Read
+       it as a triage rule, never as evidence that the customer will leave.
 """
+from .config import LOGIN_PREV_FIELD, LOGIN_RECENT_FIELD
+
 # ticket categories that signal a real problem (an account question does not)
 SERIOUS_CATEGORIES = ("DELIVERY_DELAY", "PAYMENT", "REFUND",
                       "PRODUCT_QUALITY", "ORDER_ISSUE")
@@ -32,8 +42,8 @@ def has_dissatisfaction(facts: dict) -> bool:
 
 def has_disengagement(facts: dict) -> bool:
     """Logging in less than before - or not at all in either period."""
-    prev = facts.get("logins_prev_30_60d", 0)
-    recent = facts.get("logins_recent_30d", 0)
+    prev = facts.get(LOGIN_PREV_FIELD, 0)
+    recent = facts.get(LOGIN_RECENT_FIELD, 0)
     return recent < prev or (prev == 0 and recent == 0)
 
 

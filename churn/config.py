@@ -35,6 +35,19 @@ ACTION_LOG_PATH = DATA_DIR / "action_log.json"  # who we acted on, and who was h
 # lift over random halves, and the model loses its edge over logistic regression).
 HORIZON_DAYS = 14
 ACTIVE_WINDOW_DAYS = 28            # "active at T" = any login in the 28 days before T
+
+# Engagement windows, defined ONCE. The model's features, the agent's
+# evidence, the rubric and both verifiers all used to carry their own copy:
+# features compared the last 14 days with the 14 before that, while the
+# evidence tools compared the last 30 days with the 30 before that. So the
+# sentence explaining a prediction described a different fortnight from the
+# one the model reacted to, and "logins rose" could be true in one window and
+# false in the other. They are the model's windows, because the horizon is 14
+# days: what matters is whether this fortnight looks worse than the last one.
+LOGIN_RECENT_DAYS = 14             # the recent window: [T - 14, T)
+LOGIN_PREV_DAYS = 28               # the window before it: [T - 28, T - 14)
+LOGIN_RECENT_FIELD = f"logins_last_{LOGIN_RECENT_DAYS}d"
+LOGIN_PREV_FIELD = f"logins_prev_{LOGIN_RECENT_DAYS}_{LOGIN_PREV_DAYS}d"
 CUTOFF_STEP_DAYS = HORIZON_DAYS    # snapshots spaced by the horizon: no churn counted twice
 # training snapshots, in days before the reference time (oldest first)
 TRAIN_CUTOFFS_DAYS = tuple(range(168, 41, -CUTOFF_STEP_DAYS))

@@ -20,8 +20,8 @@ class Evidence(BaseModel):
     These come from the sub-agent tools. A verifier re-computes the same
     numbers from the database and checks that they match.
     """
-    logins_prev_30_60d: int = Field(description="Login count 30 to 60 days ago")
-    logins_recent_30d: int = Field(description="Login count in the last 30 days")
+    logins_prev_14_28d: int = Field(description="Login count 14 to 28 days before the cutoff")
+    logins_last_14d: int = Field(description="Login count in the 14 days before the cutoff")
     total_orders: int = Field(description="Total orders the customer has ever placed")
     total_tickets: int = Field(description="Total support tickets the customer raised")
     unresolved_serious_tickets: int = Field(

@@ -16,7 +16,9 @@ LOGIC: We query the database ourselves, on purpose, so the check does not
 """
 import json
 
-from .config import PREDICTIONS_PATH, analysis_time, connect_readonly
+from .config import (LOGIN_PREV_FIELD, LOGIN_RECENT_FIELD, PREDICTIONS_PATH,
+                     analysis_time, connect_readonly)
+from .logins import login_counts
 from .rubric import SERIOUS_CATEGORIES
 
 
@@ -24,20 +26,7 @@ def real_facts(conn, user_id, as_of=None):
     """Compute the true five numbers for one user, as of the analysis time."""
     as_of = as_of or analysis_time(conn)   # the pipeline's point in time
     cur = conn.cursor()
-    prev = cur.execute(
-        """SELECT COUNT(*) FROM auth_audit_log
-           WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp BETWEEN datetime(?,'-60 days')
-                                     AND datetime(?,'-30 days')""",
-        (user_id, as_of, as_of),
-    ).fetchone()[0]
-    recent = cur.execute(
-        """SELECT COUNT(*) FROM auth_audit_log
-           WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp >= datetime(?,'-30 days')
-             AND event_timestamp < ?""",
-        (user_id, as_of, as_of),
-    ).fetchone()[0]
+    prev, recent = login_counts(conn, user_id, as_of)   # shared with the tools
     orders = cur.execute(
         "SELECT COUNT(*) FROM orders WHERE user_id=? AND placed_at < ?", (user_id, as_of)
     ).fetchone()[0]
@@ -56,8 +45,8 @@ def real_facts(conn, user_id, as_of=None):
     ).fetchone()[0]
     worst = worst if worst is not None else 0    # 0 means the user has no reviews
     return {
-        "logins_prev_30_60d": prev,
-        "logins_recent_30d": recent,
+        LOGIN_PREV_FIELD: prev,
+        LOGIN_RECENT_FIELD: recent,
         "total_orders": orders,
         "total_tickets": tickets,
         "unresolved_serious_tickets": serious,

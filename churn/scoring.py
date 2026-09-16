@@ -23,27 +23,20 @@ from langchain.tools import tool
 
 from .config import MODEL_PATH, analysis_time, connect_readonly
 from .features import build_features
+from .logins import login_counts
 from .memory import recently_contacted_ids
 
 
 def _login_trend(user_id: int, as_of: str):
-    """Return (logins 30-60 days before as_of, logins in the 30 days before as_of)."""
+    """Return (logins in the previous window, logins in the recent window).
+
+    The windows come from config so this matches the model's features exactly.
+    Both are half-open, [start, end): the old version used SQL BETWEEN for the
+    earlier window, which is inclusive at both ends, so a login landing exactly
+    on the boundary was counted in BOTH windows.
+    """
     conn = connect_readonly()
-    cur = conn.cursor()
-    prev = cur.execute(
-        """SELECT COUNT(*) FROM auth_audit_log
-           WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp BETWEEN datetime(?,'-60 days')
-                                     AND datetime(?,'-30 days')""",
-        (user_id, as_of, as_of),
-    ).fetchone()[0]
-    recent = cur.execute(
-        """SELECT COUNT(*) FROM auth_audit_log
-           WHERE user_id=? AND event_type='LOGIN'
-             AND event_timestamp >= datetime(?,'-30 days')
-             AND event_timestamp < ?""",
-        (user_id, as_of, as_of),
-    ).fetchone()[0]
+    prev, recent = login_counts(conn, user_id, as_of)
     conn.close()
     return prev, recent
 
@@ -108,8 +101,8 @@ def get_churn_candidates(top_n: int = 15) -> str:
             "churn_probability": round(float(r["churn_probability"]), 3),
             "avg_order_value": round(float(r["avg_order_value"]), 2),
             "priority_score": round(float(r["priority_score"]), 2),
-            "logins_prev_30_60d": prev,
-            "logins_recent_30d": recent,
+            "logins_prev_14_28d": prev,
+            "logins_last_14d": recent,
             "total_orders": int(r["total_orders"]),
         })
     return json.dumps(result, indent=2)

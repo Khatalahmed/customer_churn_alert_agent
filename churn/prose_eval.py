@@ -22,6 +22,7 @@ LOGIC: Claims are extracted by pattern, not by another LLM. Using a model to
 import re
 
 from .config import PREDICTIONS_PATH, analysis_time, connect_readonly
+from .logins import login_counts
 
 # --- claim vocabulary -------------------------------------------------------
 
@@ -172,15 +173,8 @@ def user_facts(conn, user_id, as_of=None):
             (user_id, as_of),
         )
     ]
-    logins = {}
-    for key, window in (("prev", ("-60 days", "-30 days")), ("recent", ("-30 days", "-0 days"))):
-        logins[key] = cur.execute(
-            f"""SELECT COUNT(*) FROM auth_audit_log
-                WHERE user_id=? AND event_type='LOGIN'
-                  AND event_timestamp >= datetime(?, '{window[0]}')
-                  AND event_timestamp < datetime(?, '{window[1]}')""",
-            (user_id, as_of, as_of),
-        ).fetchone()[0]
+    prev, recent = login_counts(conn, user_id, as_of)    # same windows as the model
+    logins = {"prev": prev, "recent": recent}
     corpus = " ".join(t["text"] for t in tickets) + " " + " ".join(r["text"] for r in reviews)
     return {"tickets": tickets, "reviews": reviews, "logins": logins, "corpus": corpus}
 
